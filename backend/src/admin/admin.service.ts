@@ -9,8 +9,6 @@ import { NewsScraperService } from '../news/news-scraper.service';
 import { createClient } from 'redis';
 import { RedisStore } from 'connect-redis';
 import { PL_TRANSLATIONS } from './locale';
-import { undernetResources } from './undernet-resources';
-import { UndernetPrismaService } from './undernet-prisma.service';
 
 @Injectable()
 export class AdminService {
@@ -19,7 +17,6 @@ export class AdminService {
     private prisma: PrismaService,
     private config: ConfigService,
     private scraperService: NewsScraperService,
-      private undernetDb: UndernetPrismaService,
   ) {}
 
   async onModuleInit() {
@@ -50,45 +47,6 @@ export class AdminService {
 
     const componentLoader = new ComponentLoader();
     const dashboardComponent = componentLoader.add('Dashboard', path.resolve(process.cwd(), 'src/admin/components/dashboard'));
-    /*
-     * Drugi pulpit — dla UNDERNET.ONE.
-     *
-     * AdminJS ma dokładnie jeden `dashboard`, więc undernet dostaje własną
-     * STRONĘ (`pages`), dostępną pod /admin/pages/undernet. Wpychanie obu
-     * serwisów w jeden widok oznaczałoby albo połowę pól pustych, albo
-     * liczby z dwóch baz w jednej tabeli.
-     */
-    const undernetDashboardComponent = componentLoader.add(
-      'UndernetDashboard',
-      path.resolve(process.cwd(), 'src/admin/components/undernet-dashboard'),
-    );
-
-    /* Miniatura na liście mediów i duży podgląd z listą użyć na karcie. */
-    const mediaThumbComponent = componentLoader.add(
-      'MediaThumb',
-      path.resolve(process.cwd(), 'src/admin/components/media-thumb'),
-    );
-    const mediaPreviewComponent = componentLoader.add(
-      'MediaPreview',
-      path.resolve(process.cwd(), 'src/admin/components/media-preview'),
-    );
-
-    /*
-     * Zasoby drugiego serwisu.
-     *
-     * Adapter @adminjs/prisma przyjmuje moduł klienta jako drugi argument
-     * `getModelByName`, więc jeden panel obsługuje dwa schematy i dwie bazy.
-     * Gdy klienta nie ma — bo undernet nie jest skonfigurowany — sekcja po
-     * prostu nie powstaje, a panel xdtv działa jak dotąd.
-     */
-    const undernet = this.undernetDb.isAvailable
-      ? undernetResources(getModelByName, this.undernetDb.client, this.undernetDb.module, {
-          mediaThumb: mediaThumbComponent,
-          mediaPreview: mediaPreviewComponent,
-          publicUrl: this.config.get('UNDERNET_PUBLIC_URL', 'https://undernet.one'),
-        })
-      : [];
-
     const admin = new AdminJS({
       resources: [
         // ── Users ──
@@ -345,7 +303,6 @@ export class AdminService {
             },
           },
         },
-        ...undernet,
       ],
       locale: {
         language: 'pl',
@@ -355,9 +312,6 @@ export class AdminService {
       rootPath: '/admin',
       branding: { companyName: 'XDTV Admin', logo: false },
       dashboard: { component: dashboardComponent },
-      pages: this.undernetDb.isAvailable
-        ? { undernet: { component: undernetDashboardComponent, icon: 'Book' } }
-        : {},
       componentLoader,
     });
 
@@ -447,177 +401,6 @@ export class AdminService {
       } catch {
         res.set('Content-Type', 'text/javascript;charset=utf-8');
         res.send('(function(){"use strict";AdminJS.UserComponents={}})();');
-      }
-    });
-
-    /*
-     * Statystyki UNDERNET.ONE — osobny adres, osobna baza.
-     *
-     * Pulpit xdtv liczy klipy, streamerów i kanały czatu; undernet nie ma
-     * żadnej z tych rzeczy, a ma obieg redakcyjny, którego nie ma xdtv.
-     * Wspólny pulpit musiałby albo pokazywać połowę pól pustych, albo
-     * mieszać liczby z dwóch serwisów w jednej tabeli — i jedno, i drugie
-     * jest gorsze niż dwa osobne widoki.
-     */
-    /*
-     * Gdzie używany jest dany plik z biblioteki undernetu.
-     *
-     * Na routerze panelu, bo tu działa sesja administratora — bezpośrednie
-     * wołanie API undernetu wymagałoby tokenu użytkownika tamtego serwisu.
-     */
-    adminRouter.get('/api/undernet-media/:id/uzycia', async (req: any, res: any) => {
-      if (!this.undernetDb.isAvailable) return res.status(503).json({ uzycia: [] });
-      const db = this.undernetDb.client;
-      try {
-        const asset = await db.mediaAsset.findUnique({ where: { id: Number(req.params.id) } });
-        if (!asset) return res.json({ uzycia: [] });
-
-        const [okladki, wTresci, wWpisach] = await Promise.all([
-          db.contentItem.findMany({ where: { coverUrl: asset.url }, select: { id: true, title: true }, take: 5 }),
-          db.contentItem.findMany({ where: { body: { contains: asset.url } }, select: { id: true, title: true }, take: 5 }),
-          db.post.count({ where: { content: { contains: asset.url } } }),
-        ]);
-
-        const uzycia: string[] = [];
-        for (const c of okladki) uzycia.push(`okładka #${c.id} „${String(c.title).slice(0, 45)}"`);
-        for (const c of wTresci) uzycia.push(`treść #${c.id} „${String(c.title).slice(0, 45)}"`);
-        if (wWpisach > 0) uzycia.push(`${wWpisach} wpis(ów) forum`);
-        return res.json({ uzycia });
-      } catch {
-        return res.json({ uzycia: [] });
-      }
-    });
-
-    adminRouter.get('/api/undernet-stats', async (_req: any, res: any) => {
-      if (!this.undernetDb.isAvailable) {
-        return res.status(503).json({ error: 'Baza UNDERNET.ONE jest niedostępna.' });
-      }
-      const db = this.undernetDb.client;
-
-      try {
-        const now = new Date();
-        const dzisiaj = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const tydzien = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const miesiac = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-        const [
-          uzytkownicy, uzytkownicyDzis, uzytkownicyTydzien,
-          rolaAutor, rolaRedaktor, rolaModerator,
-          proAktywne, proBezterminowe, proWygasle, proTydzien, funkcjePlatne, funkcjeWszystkie,
-          wpisy, wpisyDzis, wpisyTydzien,
-          komentarze, komentarzeDzis,
-          spolecznosci,
-          materialy, szkice, wAkceptacji, opublikowane, opublikowaneDzis, zarchiwizowane,
-          news, artykuly, howto, wiki,
-          zWatkow, autorzy, kategorie, media,
-        ] = await Promise.all([
-          db.user.count(),
-          db.user.count({ where: { createdAt: { gte: dzisiaj } } }),
-          db.user.count({ where: { createdAt: { gte: tydzien } } }),
-          db.user.count({ where: { role: 'AUTHOR' } }),
-          db.user.count({ where: { role: 'EDITOR' } }),
-          db.user.count({ where: { role: 'MODERATOR' } }),
-
-          /*
-           * UNDERNET PRO.
-           *
-           * „Aktywne" to konta z `isPro` i albo bez daty końca (dostęp
-           * nadany ręcznie), albo z datą w przyszłości. Liczenie samego
-           * `isPro` mieszałoby w to abonamenty, które już wygasły —
-           * a to zupełnie inna liczba, przydatna osobno.
-           */
-          db.user.count({
-            where: { isPro: true, OR: [{ proUntil: null }, { proUntil: { gt: now } }] },
-          }),
-          db.user.count({ where: { isPro: true, proUntil: null } }),
-          db.user.count({ where: { isPro: true, proUntil: { lte: now } } }),
-          db.user.count({
-            where: { isPro: true, proUntil: { gt: now }, updatedAt: { gte: tydzien } },
-          }),
-          db.premiumFeature.count({ where: { requiresPremium: true } }),
-          db.premiumFeature.count(),
-          db.post.count({ where: { isDeleted: false } }),
-          db.post.count({ where: { isDeleted: false, createdAt: { gte: dzisiaj } } }),
-          db.post.count({ where: { isDeleted: false, createdAt: { gte: tydzien } } }),
-          db.comment.count({ where: { isDeleted: false } }),
-          db.comment.count({ where: { isDeleted: false, createdAt: { gte: dzisiaj } } }),
-          db.community.count(),
-          db.contentItem.count(),
-          db.contentItem.count({ where: { status: 'DRAFT' } }),
-          db.contentItem.count({ where: { status: 'REVIEW' } }),
-          db.contentItem.count({ where: { status: 'PUBLISHED' } }),
-          db.contentItem.count({ where: { status: 'PUBLISHED', publishedAt: { gte: dzisiaj } } }),
-          db.contentItem.count({ where: { status: 'ARCHIVED' } }),
-          db.contentItem.count({ where: { type: 'NEWS' } }),
-          db.contentItem.count({ where: { type: 'ARTICLE' } }),
-          db.contentItem.count({ where: { type: 'HOWTO' } }),
-          db.contentItem.count({ where: { type: 'WIKI' } }),
-          // Sedno idei portalu: ile materiałów wyrosło z dyskusji.
-          db.contentItem.count({ where: { NOT: { sourcePostId: null } } }),
-          db.author.count(),
-          db.contentCategory.count(),
-          db.mediaAsset.count(),
-        ]);
-
-        // Ostatnie decyzje redakcyjne — kto co przepuścił i kiedy.
-        const decyzje = await db.editorialReview.findMany({
-          take: 8,
-          orderBy: { createdAt: 'desc' },
-          include: {
-            reviewer: { select: { username: true } },
-            contentItem: { select: { title: true, type: true } },
-          },
-        });
-
-        // Wykres: materiały opublikowane w ostatnich 14 dniach.
-        const dni: { date: string; count: number }[] = [];
-        for (let i = 13; i >= 0; i -= 1) {
-          const od = new Date(dzisiaj.getTime() - i * 24 * 60 * 60 * 1000);
-          const do_ = new Date(od.getTime() + 24 * 60 * 60 * 1000);
-          dni.push({
-            date: od.toISOString().slice(5, 10),
-            count: await db.contentItem.count({
-              where: { status: 'PUBLISHED', publishedAt: { gte: od, lt: do_ } },
-            }),
-          });
-        }
-
-        return res.json({
-          uzytkownicy: {
-            total: uzytkownicy, dzis: uzytkownicyDzis, tydzien: uzytkownicyTydzien,
-            autor: rolaAutor, redaktor: rolaRedaktor, moderator: rolaModerator,
-          },
-          pro: {
-            aktywne: proAktywne,
-            bezterminowe: proBezterminowe,
-            wygasle: proWygasle,
-            tydzien: proTydzien,
-            funkcjePlatne: funkcjePlatne,
-            funkcjeWszystkie: funkcjeWszystkie,
-            // Udział kont z PRO wśród wszystkich — jedna liczba mówiąca,
-            // czy abonament w ogóle się przyjmuje.
-            udzial: uzytkownicy > 0 ? Math.round((proAktywne / uzytkownicy) * 1000) / 10 : 0,
-          },
-          forum: {
-            wpisy, wpisyDzis, wpisyTydzien, komentarze, komentarzeDzis, spolecznosci,
-          },
-          wiedza: {
-            materialy, szkice, wAkceptacji, opublikowane, opublikowaneDzis, zarchiwizowane,
-            news, artykuly, howto, wiki, zWatkow, autorzy, kategorie, media,
-          },
-          decyzje: decyzje.map((d: any) => ({
-            kto: d.reviewer?.username ?? '—',
-            tytul: d.contentItem?.title ?? '(usunięty)',
-            typ: d.contentItem?.type ?? '',
-            z: d.fromStatus,
-            na: d.toStatus,
-            kiedy: d.createdAt,
-            uwaga: d.note,
-          })),
-          dziennie: dni,
-        });
-      } catch (e: any) {
-        return res.status(500).json({ error: e?.message ?? 'Nie udało się policzyć statystyk.' });
       }
     });
 

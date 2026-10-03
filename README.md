@@ -18,7 +18,7 @@ Działa produkcyjnie pod **[xdtv.fans](https://xdtv.fans)**.
 | Zaangażowanie | codzienne wyzwania, serie aktywności, sklep |
 | Konto | rejestracja z potwierdzeniem e-mail, logowanie przez Discord, Google, Twitch i inne |
 | Monetyzacja | Stripe (subskrypcje w trzech progach), bloki reklamowe z panelu |
-| Panel | AdminJS pod `/admin`, wspólny z [UNDERNET.ONE](https://github.com/V-SGFX/undernet.one-v2) |
+| Panel | AdminJS pod `/admin` — moderacja, konta, treści, monetyzacja |
 
 ## Technologie
 
@@ -36,9 +36,24 @@ Działa produkcyjnie pod **[xdtv.fans](https://xdtv.fans)**.
 - TanStack Query, Tailwind CSS, Framer Motion
 - next-intl (polski i angielski)
 
-## Uruchomienie lokalne
+## Instalacja
 
-Wymagania: Node.js 20+, PostgreSQL, Redis.
+Wymagania: Node.js 20+, PostgreSQL (pusta baza), Redis.
+
+Najprościej skryptem — pyta o domenę, bazę i konto administratora, losuje
+sekrety, zakłada tabele, tworzy administratora i buduje obie części:
+
+```bash
+git clone https://github.com/V-SGFX/xdtv.fans.git
+cd xdtv.fans
+./install.sh
+```
+
+Hasło administratora podajesz przy instalacji i nigdzie nie jest zapisywane
+(trafia tylko do seeda). Na serwerze przykład nginx leży w
+`deploy/nginx.conf.example`.
+
+### Ręcznie
 
 ```bash
 # API
@@ -75,24 +90,12 @@ cd frontend && npm run build && npm start
 Przed oboma procesami stoi reverse proxy (u nas nginx): `/api/`,
 `/uploads/`, `/socket.io/` i `/admin` kierujemy do API, resztę do Next.js.
 
-## Wspólny panel z UNDERNET.ONE
-
-Panel AdminJS obsługuje obie bazy. Drugi klient Prisma korzysta z kopii
-schematu undernetu w `backend/prisma/undernet/schema.prisma`. Tego pliku
-nie edytuje się ręcznie, tylko odświeża skryptem:
-
-```bash
-node scripts/sync-undernet-schema.mjs
-```
-
-Bez `UNDERNET_DATABASE_URL` sekcje undernetu w panelu się nie pojawiają.
-
 ## Struktura
 
 ```
 backend/
-  prisma/            schemat, migracje, kopia schematu undernetu
-  scripts/           import streamerów i klipów, synchronizacja schematu
+  prisma/            schemat i migracje
+  scripts/           import streamerów i klipów z platform
   src/<moduł>/       moduły NestJS (streamers, platform-sync, communities, gateway, admin, …)
 frontend/
   messages/          tłumaczenia pl / en
@@ -100,6 +103,18 @@ frontend/
   src/components/    komponenty interfejsu
   src/lib/           klient API, kontekst logowania, typy
 ```
+
+## Powiadomienie o instalacji (dobrowolne)
+
+Na końcu `install.sh` pyta, czy wysłać autorowi jedno powiadomienie, że
+projekt został postawiony. **Domyślnie nic się nie wysyła** — dopiero po
+wyraźnym „tak”. Ping zawiera wyłącznie nazwę projektu, wersję i datę; nie
+wysyła adresu IP, nazwy serwera ani żadnych danych instalującego.
+
+Funkcja działa tylko, gdy ustawiony jest adres powiadomień
+(`NOTIFY_URL_DEFAULT` w skrypcie lub `INSTALL_NOTIFY_URL`). W publikowanym
+kodzie jest pusty, więc bez konfiguracji pytanie w ogóle się nie pojawia.
+Można ją wyłączyć z góry: `INSTALL_NO_TELEMETRY=1 ./install.sh`.
 
 ## Licencja
 

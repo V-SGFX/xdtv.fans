@@ -45,17 +45,6 @@ export const PL_TRANSLATIONS = {
     loginWelcome: 'Panel administracyjny XDTV',
     dashboard: 'Pulpit',
   },
-  /*
-   * Nazwy stron w menu bocznym.
-   *
-   * Osobna przestrzeń od `labels` — AdminJS tłumaczy je przez
-   * `translatePage(name)`, nie `translateLabel`. Wpis w `labels` nie
-   * działał i w menu stał surowy identyfikator „Undernet".
-   */
-  pages: {
-    undernet: 'Pulpit UNDERNET.ONE',
-  },
-
   messages: {
     successfullyCreated: 'Wpis utworzony',
     successfullyUpdated: 'Zmiany zapisane',
@@ -91,69 +80,6 @@ export const PL_TRANSLATIONS = {
     category: 'Kategoria',
   },
   resources: {
-    /*
-     * Zasoby undernetu tłumaczy się po ICH identyfikatorze, nie po nazwie
-     * modelu — inaczej wpis trafiłby do zasobu xdtv o tej samej nazwie.
-     */
-    UndernetSwitch: {
-      properties: {
-        key: 'Klucz',
-        label: 'Przełącznik',
-        enabled: 'Włączone',
-        description: 'Opis',
-        updatedAt: 'Zmieniono',
-      },
-    },
-    UndernetUser: {
-      properties: {
-        username: 'Nazwa konta',
-        displayName: 'Nazwa wyświetlana',
-        isPro: 'PRO',
-        proUntil: 'PRO do',
-        stripeCustomerId: 'Klient Stripe',
-        stripeSubscriptionId: 'Subskrypcja Stripe',
-        stripeStatus: 'Stan w Stripe',
-        bio: 'O sobie',
-        website: 'Strona',
-        location: 'Lokalizacja',
-        nameColor: 'Kolor nicku',
-        nameStyle: 'Styl nicku',
-        avatarRing: 'Otoczka awatara',
-      },
-      /*
-       * Nazwy akcji własnych. AdminJS nie czyta `label` z opisu akcji —
-       * bierze tłumaczenie po kluczu `resources.<id>.actions.<akcja>`,
-       * a bez wpisu wyświetla samą nazwę funkcji rozbitą na wyrazy
-       * („Nadaj Pro", „Reset Password") pośród polskich przycisków.
-       */
-      actions: {
-        nadajPro: 'Nadaj PRO na rok',
-        odbierzPro: 'Odbierz PRO',
-        resetPassword: 'Resetuj hasło',
-      },
-    },
-    UndernetPremium: {
-      properties: {
-        key: 'Klucz',
-        name: 'Nazwa',
-        description: 'Opis',
-        position: 'Kolejność',
-        requiresPremium: 'Wymaga PRO',
-      },
-    },
-    UndernetMedia: {
-      properties: {
-        url: 'Podgląd',
-        filename: 'Nazwa pliku',
-        mimeType: 'Format',
-        sizeBytes: 'Rozmiar (B)',
-        alt: 'Opis alternatywny',
-        caption: 'Podpis',
-        uploadedBy: 'Wgrał',
-        width: 'Szerokość',
-        height: 'Wysokość',
-      },
-    },
     User: {
       properties: {
         username: 'Nazwa użytkownika',

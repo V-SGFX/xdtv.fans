@@ -1,0 +1,1156 @@
+// ─────────────────────────────────────────────────────────────────────
+//  KOPIA — NIE EDYTUJ RĘCZNIE
+//
+//  Wygenerowane z: /var/www/undernetone/backend/prisma/schema.prisma
+//  Odświeżenie:    node scripts/sync-undernet-schema.mjs
+//
+//  Drugi klient Prismy, żeby wspólny AdminJS czytał bazę UNDERNET.ONE.
+//  Zmiana modelu po tamtej stronie wymaga uruchomienia skryptu i
+//  ponownego `prisma generate` — inaczej panel buduje zapytania po
+//  kolumnach, których w bazie już nie ma.
+// ─────────────────────────────────────────────────────────────────────
+
+// UNDERNET.ONE — schemat bazy
+//
+// Skopiowany ze szkieletu xdtv.fans i przycięty do tego, czym undernet
+// faktycznie jest: portalem wiedzy z forum, a nie serwisem klipów.
+//
+// Co wypadło i dlaczego:
+//   StreamerProfile, Channel, Message, Battle, HotTake, Prediction,
+//   UserXp, UserStreak, UserCosmetic — należą do produktu, w którym
+//   treścią są transmisje. Tu treścią są artykuły.
+//
+// Co doszło: warstwa wiedzy — ContentItem, ContentCategory, Author,
+// MediaAsset, EditorialReview. Opisana niżej.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../../node_modules/.prisma/client-undernet"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("UNDERNET_DATABASE_URL")
+}
+
+
+enum UserRole {
+  USER
+  /// Tworzy materiały i zgłasza je do akceptacji. Edytuje wyłącznie swoje.
+  AUTHOR
+  /// Akceptuje, redaguje i publikuje cudze materiały.
+  EDITOR
+  /// Moderuje społeczność: posty, komentarze, zgłoszenia.
+  MODERATOR
+  ADMIN
+  /// Pozostałość po szkielecie xdtv. Nieużywana — usunięcie wymagałoby
+  /// migracji danych bez żadnego zysku.
+  STREAMER
+}
+
+enum PostType {
+  TEXT
+  LINK
+  IMAGE
+  VIDEO
+  CLIP
+  POLL
+  AMA
+}
+
+enum ClipSource {
+  UPLOAD
+  YOUTUBE
+  TIKTOK
+  TWITCH
+  KICK
+}
+
+enum TagType {
+  GAME      /// A title: fortnite, cs2, elden-ring
+  CATEGORY  /// A content category: just-chatting, irl, music, esports
+  LANGUAGE  /// Broadcast language: english, russian, spanish
+  FORMAT    /// Source or medium: clip, twitch, youtube, shorts
+  TOPIC     /// Free-form theme or mood: humor, drama, speedrun (default)
+}
+
+enum NotificationType {
+  COMMENT_ON_POST
+  REPLY_TO_COMMENT
+  VOTE_ON_POST
+  VOTE_ON_COMMENT
+  NEW_FOLLOWER
+  MENTION
+  CHANNEL_CREATED
+  STREAK_WARNING
+  LEVEL_UP
+  PREDICTION_RESOLVED
+  /// Trafienie w słowo kluczowe pilnowane przez użytkownika.
+  ALERT_MATCH
+  /// Okresowe podsumowanie z obserwowanych społeczności i tagów.
+  TOPIC_DIGEST
+}
+
+enum ReportTargetType {
+  POST
+  COMMENT
+  USER
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+enum ModeratorStatus {
+  /// Nominated, waiting for an administrator. Grants nothing.
+  PENDING
+  /// Approved. This is the only status that grants moderation powers.
+  ACTIVE
+  /// Rejected before approval, or withdrawn afterwards. Kept rather than
+  /// deleted so the history of who moderated what stays readable.
+  REVOKED
+}
+
+enum NewsCategory {
+  DRAMA      /// conflicts, controversies, callouts
+  STREAMERS  /// people: bans, returns, milestones
+  EVENTS     /// tournaments, esports, announcements
+  GAMING     /// releases, patches, general games press
+}
+
+enum NewsSource {
+  RSS
+  SCRAPER
+  MANUAL
+}
+
+enum VoteType {
+  UP
+  DOWN
+}
+
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  username      String    @unique
+  passwordHash  String?   @map("password_hash")  // nullable for OAuth-only users
+  displayName   String?   @map("display_name")
+
+  // Konta zewnętrzne, którymi można się zalogować.
+  // Twitch, Kick, YouTube i TikTok przyszły tu ze szkieletu xdtv i nie mają
+  // nic wspólnego z tematyką tego portalu — logowanie streamerskie zostało
+  // zdjęte razem z całą warstwą streamingu.
+  discordId     String?   @unique @map("discord_id")
+  googleId      String?   @unique @map("google_id")
+  githubId      String?   @unique @map("github_id")
+
+  /// UNDERNET PRO.
+  ///
+  /// Bez tego pola przełączniki funkcji byłyby ozdobą: włączenie
+  /// „wymaga PRO" odcinałoby funkcję WSZYSTKIM, bo nikt nie mógłby jej
+  /// mieć. Płatności (Stripe) dojdą później — dziś dostęp nadaje się
+  /// ręcznie z panelu, co pozwala przełączniki w ogóle sprawdzić.
+  isPro         Boolean   @default(false) @map("is_pro")
+  collections   Collection[]
+  privateNotes  PrivateNote[]
+  alerts        Alert[]
+  /// Do kiedy wykupione. Puste przy dostępie bezterminowym lub nadanym ręcznie.
+  proUntil      DateTime? @map("pro_until")
+
+  /// Klient w Stripe. Trzymamy go, żeby drugi zakup z tego samego konta
+  /// nie zakładał drugiego klienta — inaczej historia płatności jednej
+  /// osoby rozsypałaby się po kilku kartotekach.
+  stripeCustomerId     String?   @unique @map("stripe_customer_id")
+  /// Bieżąca subskrypcja. Po niej rozpoznajemy webhooki o odnowieniu
+  /// i rezygnacji; sam identyfikator klienta by nie wystarczył.
+  stripeSubscriptionId String?   @map("stripe_subscription_id")
+  /// Stan subskrypcji prosto ze Stripe'a (active, past_due, canceled…).
+  /// Zapisany dosłownie, bo to Stripe jest tu źródłem prawdy.
+  stripeStatus         String?   @map("stripe_status")
+  avatarUrl     String?   @map("avatar_url")
+
+  /// Rozszerzony profil (UNDERNET PRO).
+  ///
+  /// Pola same w sobie są niewinne — płatna jest MOŻLIWOŚĆ ICH USTAWIENIA,
+  /// nie ich odczyt. Kto straci PRO, nie znika z sieci: profil zostaje taki,
+  /// jaki był, tylko przestaje się dawać zmieniać.
+  bio           String?
+  website       String?
+  location      String?
+  bannerUrl     String?   @map("banner_url")
+
+  /// Ozdoby nicku i awatara (UNDERNET PRO).
+  ///
+  /// Trzymamy KLUCZ z zamkniętej listy („fiolet", „gradient-cyan"), nigdy
+  /// koloru ani CSS-a od użytkownika. Gdyby tu wpadał dowolny styl, nick
+  /// stałby się miejscem na wstrzyknięcie skryptu i na napisy rozjeżdżające
+  /// układ innym — a ozdoba nicku nie jest tego warta.
+  ///
+  /// Ustawienia zostają po wygaśnięciu PRO, ale przestają się wyświetlać:
+  /// gwiazdka i kolor mają znaczyć „ma PRO teraz", nie „miał kiedyś".
+  nameColor     String?   @map("name_color")
+  nameStyle     String?   @map("name_style")
+  avatarRing    String?   @map("avatar_ring")
+  role          UserRole  @default(USER)
+  isActive      Boolean   @default(true) @map("is_active")
+
+  // Email verification
+  isEmailVerified     Boolean   @default(false) @map("is_email_verified")
+  emailVerifyToken    String?   @map("email_verify_token")
+
+  // Password reset
+  passwordResetToken  String?   @map("password_reset_token")
+  passwordResetExpires DateTime? @map("password_reset_expires")
+
+  lastActiveAt  DateTime? @map("last_active_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  posts           Post[]
+  follows         Follow[]
+  comments        Comment[]
+  votes           Vote[]
+  notifications   Notification[] @relation("UserNotifications")
+  actedNotifications Notification[] @relation("NotificationActor")
+  reports         Report[]       @relation("UserReports")
+  resolvedReports Report[]       @relation("ReportResolver")
+  postReactions   PostReaction[]
+
+  communitiesCreated  Community[]          @relation("CommunityCreator")
+  communityMembers    CommunityMember[]
+  communityMods       CommunityModerator[]
+  modNominationsMade  CommunityModerator[] @relation("ModeratorNominatedBy")
+  modApprovalsMade    CommunityModerator[] @relation("ModeratorApprovedBy")
+  communityBans       CommunityBan[]       @relation("CommunityBannedUser")
+  communityBansBy     CommunityBan[]       @relation("CommunityBannedByUser")
+  preferences         UserPreference?
+  pollVotes           PollVote[]
+
+  // Admin
+  adminActionLogs     AdminActionLog[]
+
+  @@index([role])
+  @@index([lastActiveAt])
+  @@index([createdAt])
+  @@map("users")
+
+  author            Author?
+  editorialReviews  EditorialReview[]
+  mediaAssets       MediaAsset[]
+  revisionsMade     ContentRevision[] @relation("RevisionEditor")
+}
+
+model UserPreference {
+  id                  Int      @id @default(autoincrement())
+  userId              Int      @unique @map("user_id")
+  likedTagSlugs       String[] @default([]) @map("liked_tag_slugs")       // tag slugs the user engaged with
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+model Post {
+  id              Int       @id @default(autoincrement())
+  authorId        Int       @map("author_id")
+  communityId     Int?      @map("community_id")
+  title           String
+  content         String
+  type            PostType  @default(TEXT)
+  isOfficial      Boolean   @default(false) @map("is_official")
+  isNsfw          Boolean   @default(false) @map("is_nsfw")
+  isFlagged       Boolean   @default(false) @map("is_flagged")
+  imageUrl        String?   @map("image_url")
+  linkUrl         String?   @map("link_url")
+  videoUrl        String?   @map("video_url")
+  thumbnailUrl    String?   @map("thumbnail_url")
+  clipSource      ClipSource? @map("clip_source")
+  externalId      String?   @map("external_id")
+  duration        Int?      // seconds (for clips)
+  viewCount       Int       @default(0) @map("view_count")
+  upvotes         Int       @default(0)
+  downvotes       Int       @default(0)
+  commentCount    Int       @default(0) @map("comment_count")
+  hotScore        Float     @default(0) @map("hot_score")
+  isPinned        Boolean   @default(false) @map("is_pinned")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  author          User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  community       Community? @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  comments        Comment[]
+  votes           Vote[]
+  tags            PostTag[]
+  reactions       PostReaction[]
+  images          PostImage[]
+  poll            Poll?
+  follows         Follow[]
+
+  @@index([authorId])
+  @@index([communityId])
+  @@index([createdAt])
+  @@index([type])
+  @@index([isOfficial])
+  @@index([hotScore])
+  @@map("posts")
+
+  derivedContent    ContentItem[]
+  collectionItems   CollectionItem[]
+  privateNotes      PrivateNote[]
+}
+
+model PostImage {
+  id        Int      @id @default(autoincrement())
+  postId    Int      @map("post_id")
+  url       String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@map("post_images")
+}
+
+model Poll {
+  id        Int          @id @default(autoincrement())
+  postId    Int          @unique @map("post_id")
+  endsAt    DateTime?    @map("ends_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  post      Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  options   PollOption[]
+
+  @@map("polls")
+}
+
+model PollOption {
+  id        Int        @id @default(autoincrement())
+  pollId    Int        @map("poll_id")
+  text      String
+  order     Int        @default(0)
+  voteCount Int        @default(0) @map("vote_count")
+
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes     PollVote[]
+
+  @@index([pollId])
+  @@map("poll_options")
+}
+
+model PollVote {
+  id        Int        @id @default(autoincrement())
+  optionId  Int        @map("option_id")
+  userId    Int        @map("user_id")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([optionId, userId])
+  @@index([userId])
+  @@map("poll_votes")
+}
+
+model PostReaction {
+  id          Int       @id @default(autoincrement())
+  postId      Int       @map("post_id")
+  userId      Int       @map("user_id")
+  emoji       String
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId, emoji])
+  @@index([postId])
+  @@map("post_reactions")
+}
+
+model Tag {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  slug        String    @unique
+  color       String?
+  type        TagType   @default(TOPIC)
+  postCount   Int       @default(0) @map("post_count")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  posts       PostTag[]
+  follows     Follow[]
+
+  @@index([slug])
+  @@index([postCount])
+  @@index([type])
+  @@map("tags")
+
+  contentItems      ContentItemTag[]
+}
+
+model PostTag {
+  postId    Int     @map("post_id")
+  tagId     Int     @map("tag_id")
+
+  // Relations
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+  @@map("post_tags")
+}
+
+/// Obserwowanie.
+///
+/// Jedna tabela na wszystkie rodzaje, a nie osobna per typ: pytanie
+/// „co obserwuję" musi dać się zadać jednym zapytaniem, inaczej strona
+/// obserwowanych robi cztery. Dokładnie jedno z pól celu jest wypełnione.
+model Follow {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  communityId   Int?     @map("community_id")
+  tagId         Int?     @map("tag_id")
+  authorId      Int?     @map("author_id")
+  postId        Int?     @map("post_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  community     Community? @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  tag           Tag?       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  author        Author?    @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  post          Post?      @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, communityId])
+  @@unique([userId, tagId])
+  @@unique([userId, authorId])
+  @@unique([userId, postId])
+  @@index([communityId])
+  @@index([tagId])
+  @@index([authorId])
+  @@map("follows")
+}
+
+model Comment {
+  id          Int       @id @default(autoincrement())
+  postId      Int?      @map("post_id")
+  /// Komentarz pod materiałem bazy wiedzy. Wcześniej wskazywał osobną
+  /// tabelę `news`; po scaleniu newsów z ContentItem wskazuje ją samą,
+  /// więc komentować da się artykuł, poradnik i wpis wiki tym samym kodem.
+  contentItemId Int?    @map("content_item_id")
+  authorId    Int       @map("author_id")
+  parentId    Int?      @map("parent_id")
+  content     String
+  depth       Int       @default(0) @db.SmallInt
+  path        String    @default("")
+  upvotes     Int       @default(0)
+  downvotes   Int       @default(0)
+  isDeleted   Boolean   @default(false) @map("is_deleted")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  post        Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  contentItem ContentItem? @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent      Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Comment[] @relation("CommentReplies")
+
+  votes       Vote[]
+
+  @@index([postId, createdAt])
+  @@index([contentItemId])
+  @@index([postId, path])
+  @@index([authorId])
+  @@index([parentId])
+  @@map("comments")
+}
+
+model Vote {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  postId      Int?      @map("post_id")
+  commentId   Int?      @map("comment_id")
+  type        VoteType
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post        Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment     Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+  @@index([postId])
+  @@index([commentId])
+  @@map("votes")
+}
+
+model Notification {
+  id          Int               @id @default(autoincrement())
+  userId      Int               @map("user_id")
+  actorId     Int?              @map("actor_id")
+  type        NotificationType
+  postId      Int?              @map("post_id")
+  commentId   Int?              @map("comment_id")
+  message     String
+  isRead      Boolean           @default(false) @map("is_read")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  // Relations
+  user        User              @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor       User?             @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model Report {
+  id              Int              @id @default(autoincrement())
+  reporterId      Int              @map("reporter_id")
+  targetType      ReportTargetType @map("target_type")
+  targetId        Int              @map("target_id")
+  reason          String
+  status          ReportStatus     @default(PENDING)
+  adminNote       String?          @map("admin_note")
+  resolvedById    Int?             @map("resolved_by_id")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  reporter        User             @relation("UserReports", fields: [reporterId], references: [id], onDelete: Cascade)
+  resolvedBy      User?            @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([targetType, targetId])
+  @@index([reporterId])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model Community {
+  id            Int       @id @default(autoincrement())
+  name          String    @unique
+  slug          String    @unique
+  description   String?
+  iconUrl       String?   @map("icon_url")
+  bannerUrl     String?   @map("banner_url")
+  color         String?   // hex color for theming
+  isOfficial    Boolean   @default(false) @map("is_official")
+  rules         String?   // community rules (markdown)
+  postCount     Int       @default(0) @map("post_count")
+  memberCount   Int       @default(0) @map("member_count")
+  createdById   Int       @map("created_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  createdBy     User      @relation("CommunityCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  posts         Post[]
+  members       CommunityMember[]
+  moderators    CommunityModerator[]
+  bans          CommunityBan[]
+
+  @@index([slug])
+  @@index([postCount])
+  @@index([memberCount])
+  @@index([createdAt])
+  @@map("communities")
+  follows       Follow[]
+}
+
+model CommunityMember {
+  id            Int       @id @default(autoincrement())
+  communityId   Int       @map("community_id")
+  userId        Int       @map("user_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([communityId])
+  @@index([userId])
+  @@map("community_members")
+}
+
+model CommunityModerator {
+  id            Int             @id @default(autoincrement())
+  communityId   Int             @map("community_id")
+  userId        Int             @map("user_id")
+  status        ModeratorStatus @default(PENDING)
+
+  /// Who put this person forward — the community owner, or an admin acting
+  /// directly. Kept apart from approvedBy so "who wanted this" and "who
+  /// allowed it" stay two separate questions.
+  nominatedById Int?            @map("nominated_by_id")
+  approvedById  Int?            @map("approved_by_id")
+  approvedAt    DateTime?       @map("approved_at")
+  revokedAt     DateTime?       @map("revoked_at")
+  /// Why a nomination was rejected or an appointment withdrawn.
+  reason        String?
+
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nominatedBy   User?     @relation("ModeratorNominatedBy", fields: [nominatedById], references: [id], onDelete: SetNull)
+  approvedBy    User?     @relation("ModeratorApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([communityId, userId])
+  @@index([communityId])
+  @@index([userId])
+  /// The admin queue reads pending nominations across every community.
+  @@index([status])
+  @@map("community_moderators")
+}
+
+model CommunityBan {
+  id            Int       @id @default(autoincrement())
+  communityId   Int       @map("community_id")
+  userId        Int       @map("user_id")
+  bannedById    Int       @map("banned_by_id")
+  reason        String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user          User      @relation("CommunityBannedUser", fields: [userId], references: [id], onDelete: Cascade)
+  bannedBy      User      @relation("CommunityBannedByUser", fields: [bannedById], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([communityId])
+  @@index([userId])
+  @@map("community_bans")
+}
+
+/// Źródło RSS dla scrapera newsów. Zostaje jako tabela konfiguracji —
+/// scraper zapisuje teraz ContentItem typu NEWS, a nie osobne wiersze.
+/// Co wchodzi w skład UNDERNET PRO.
+///
+/// Jeden wiersz na funkcję, z jednym przełącznikiem: `requiresPremium`.
+/// WŁĄCZONY  = funkcja tylko dla wykupionego PRO.
+/// WYŁĄCZONY = funkcja dostępna dla wszystkich, także darmowych kont.
+///
+/// Lista siedzi w BAZIE, nie w kodzie, bo to decyzja handlowa, nie
+/// techniczna — ma dać się zmienić z panelu bez wdrożenia. Klucz jest
+/// kontraktem z kodem strony i nie wolno go zmieniać.
+/// Nazwany zbiór zapisanych rzeczy.
+///
+/// Zakładki (`Follow` z `postId`) zostają OSOBNO i zostają DARMOWE — to
+/// jedna płaska lista „zapisane", która działa od dawna i odebranie jej
+/// byłoby cofnięciem funkcji, a nie wprowadzeniem nowej. Kolekcje są
+/// warstwą wyżej: nazwane zbiory, do których trafia i wątek z forum,
+/// i materiał z bazy wiedzy.
+model Collection {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  name        String
+  description String?
+  /// Kolejność na liście właściciela. Mniejsza liczba wyżej.
+  position    Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CollectionItem[]
+
+  /// Dwie kolekcje o tej samej nazwie u jednego użytkownika to pomyłka,
+  /// nie zamiar — nie da się ich potem odróżnić na liście.
+  @@unique([userId, name])
+  @@index([userId, position])
+  @@map("collections")
+}
+
+/// Pozycja w kolekcji: ALBO wątek forum, ALBO materiał bazy wiedzy.
+model CollectionItem {
+  id            Int      @id @default(autoincrement())
+  collectionId  Int      @map("collection_id")
+  postId        Int?     @map("post_id")
+  contentItemId Int?     @map("content_item_id")
+  /// Po co to tu trafiło. Widoczne tylko dla właściciela kolekcji.
+  note          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  collection  Collection   @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  post        Post?        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  contentItem ContentItem? @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  /// Ta sama rzecz dwa razy w jednej kolekcji nie ma sensu.
+  @@unique([collectionId, postId])
+  @@unique([collectionId, contentItemId])
+  @@index([collectionId, createdAt])
+  @@map("collection_items")
+}
+
+/// Prywatna notatka do wątku albo materiału.
+///
+/// Widoczna WYŁĄCZNIE dla autora — to nie komentarz i nie ma trybu
+/// publicznego. Gdyby kiedykolwiek miała go dostać, musiałaby to być
+/// osobna encja: notatka pisana „dla siebie" brzmi zupełnie inaczej niż
+/// wypowiedź pisana dla innych, a przełącznik widoczności zamieniłby
+/// jedno w drugie bez wiedzy piszącego.
+model PrivateNote {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  postId        Int?     @map("post_id")
+  contentItemId Int?     @map("content_item_id")
+  body          String
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post        Post?        @relation(fields: [postId], references: [id], onDelete: Cascade)
+  contentItem ContentItem? @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+
+  /// Jedna notatka na rzecz. Druga do tego samego wątku to nie „kolejna
+  /// myśl", tylko rozdwojenie tej samej — lepiej dopisać do istniejącej.
+  @@unique([userId, postId])
+  @@unique([userId, contentItemId])
+  @@index([userId, updatedAt])
+  @@map("private_notes")
+}
+
+enum AlertScope {
+  /// Nowe wątki na forum.
+  POSTS
+  /// Nowe materiały bazy wiedzy.
+  CONTENT
+  /// Jedno i drugie.
+  BOTH
+}
+
+/// Pilnowane słowo kluczowe.
+///
+/// Osobno od obserwowania społeczności: obserwowanie mówi „interesuje mnie
+/// to miejsce", alert — „interesuje mnie ten temat, gdziekolwiek się
+/// pojawi". Podsumowania z obserwowanych miejsc idą tym samym mechanizmem,
+/// tylko bez frazy (patrz `TopicDigest`).
+model Alert {
+  id          Int        @id @default(autoincrement())
+  userId      Int        @map("user_id")
+  /// Czego szukamy. Dopasowanie bez rozróżniania wielkości liter.
+  phrase      String
+  scope       AlertScope @default(BOTH)
+  isActive    Boolean    @default(true) @map("is_active")
+  /// Dokąd doszliśmy przy ostatnim sprawdzeniu — żeby nie powiadamiać
+  /// dwa razy o tym samym i nie przeglądać archiwum przy każdym cyklu.
+  lastPostId  Int        @default(0) @map("last_post_id")
+  lastItemId  Int        @default(0) @map("last_item_id")
+  hitCount    Int        @default(0) @map("hit_count")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, phrase])
+  @@index([isActive])
+  @@map("alerts")
+}
+
+/**
+ * Przełączniki całego serwisu.
+ *
+ * Osobno od `PremiumFeature`, bo tamta tabela odpowiada na pytanie „czy ta
+ * funkcja wymaga opłaty", a ta na „czy w ogóle o tym mówimy". Wrzucenie
+ * jednego do drugiego wystawiłoby przełącznik widoczności jako dziewiątą
+ * pozycję na stronie z cennikiem.
+ *
+ * Wartość jest booleanem, a nie tekstem: pole `value` typu String zamienia
+ * panel w miejsce na literówki („tak", „yes", „1"), a kod w zgadywankę.
+ */
+model SiteSetting {
+  id          Int      @id @default(autoincrement())
+  /// Nazwa używana w kodzie. Stała.
+  key         String   @unique
+  label       String
+  description String?
+  enabled     Boolean  @default(true)
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("site_settings")
+}
+
+model PremiumFeature {
+  id              Int      @id @default(autoincrement())
+  /// Nazwa używana w kodzie. Stała.
+  key             String   @unique
+  name            String
+  description     String?
+  /// Kolejność na liście w panelu i na stronie z cennikiem.
+  position        Int      @default(0)
+  /// Sedno: czy funkcja wymaga wykupienia PRO.
+  requiresPremium Boolean  @default(false) @map("requires_premium")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([position])
+  @@map("premium_features")
+}
+
+model RssSource {
+  id            Int       @id @default(autoincrement())
+  name          String
+  url           String    @unique
+  language      String    @default("en")
+  /// Everything this feed produces lands in this bucket. Feed-level rather
+  /// than per-article because publishers already split by section, and
+  /// classifying headlines by keyword guesses badly.
+  category      NewsCategory @default(GAMING)
+  isActive      Boolean   @default(true) @map("is_active")
+  lastScrapedAt DateTime? @map("last_scraped_at")
+  articlesCount Int       @default(0) @map("articles_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("rss_sources")
+}
+
+model AdminActionLog {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  action      String   // e.g., "TRIGGER_SYNC", "UPDATE_SETTINGS", "RETRY_JOB"
+  targetType  String   @map("target_type") // e.g., "SYNC", "GAME", "SETTINGS"
+  targetId    String?  @map("target_id")
+  metadata    Json?    // additional data
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("admin_action_logs")
+}
+
+model AdSlot {
+  id          Int      @id @default(autoincrement())
+  /// Identyfikator używany w kodzie strony, np. "home-top".
+  key         String   @unique
+  /// Nazwa dla człowieka w panelu.
+  name        String
+  /// Gdzie dokładnie ten blok się pokazuje — opis dla administratora.
+  description String?
+  /// Kod od dostawcy reklam (AdSense, sieć afiliacyjna, własny baner).
+  code        String?
+  /// Wyłączony blok nie trafia do API w ogóle.
+  isActive    Boolean  @default(false) @map("is_active")
+  /// Kolejność w panelu; nie wpływa na wygląd strony.
+  position    Int      @default(0)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("ad_slots")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  WARSTWA WIEDZY
+//
+//  Rdzeń undernetu: FORUM → WIEDZA → HOW TO → WIKI. Dyskusja jest
+//  źródłem, baza wiedzy jej pamięcią.
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Typ materiału w bazie wiedzy.
+enum ContentType {
+  /// Artykuł — tekst redakcyjny, ma autora i datę.
+  ARTICLE
+  /// Poradnik — instrukcja krok po kroku, powstaje zwykle z wątku.
+  HOWTO
+  /// Wpis wiki — opis pojęcia, żyje i jest aktualizowany.
+  WIKI
+  /// Aktualność — krótka informacja, szybka w przygotowaniu.
+  /// Tu, a nie w osobnej tabeli: news ma tytuł, zajawkę, treść, kategorię,
+  /// obrazek i datę publikacji, czyli dokładnie to samo co artykuł.
+  /// Dwie tabele oznaczałyby dwa zapytania przy „najnowsze materiały",
+  /// dwa obiegi publikacji i dwa systemy SEO.
+  NEWS
+}
+
+/// Etap obiegu redakcyjnego.
+enum ContentStatus {
+  /// Szkic autora. Nie widoczny publicznie.
+  DRAFT
+  /// Zgłoszony do akceptacji redakcji.
+  REVIEW
+  /// Opublikowany.
+  PUBLISHED
+  /// Wycofany z publikacji, ale zachowany.
+  ARCHIVED
+}
+
+/// Materiał bazy wiedzy — artykuł, poradnik albo wpis wiki.
+///
+/// JEDEN model z rozróżnikiem `type`, a nie trzy osobne tabele.
+/// Artykuł, poradnik i wiki dzielą tytuł, adres, treść, autora,
+/// kategorię, tagi, status i obieg redakcyjny — czyli wszystko poza
+/// nazwą. Trzy tabele oznaczałyby trzy zapytania w każdym miejscu,
+/// w którym pokazujemy „ostatnie materiały", i trzykrotne powielenie
+/// obiegu publikacji. W panelu rozróżnia je filtr po `type`.
+model ContentItem {
+  id          Int           @id @default(autoincrement())
+  type        ContentType
+  status      ContentStatus @default(DRAFT)
+
+  title       String
+  /// Fragment adresu, unikalny w obrębie typu.
+  slug        String
+  /// Zajawka pokazywana na kafelku i w wynikach wyszukiwania.
+  excerpt     String?
+  /// Treść w Markdownie.
+  body        String
+
+  coverUrl    String?       @map("cover_url")
+
+  authorId    Int?          @map("author_id")
+  categoryId  Int?          @map("category_id")
+
+  /// Wątek na forum, z którego materiał powstał. Sedno idei portalu:
+  /// wiedza ma widoczne źródło w dyskusji, a nie bierze się znikąd.
+  sourcePostId Int?         @map("source_post_id")
+
+  /// Szacowany czas czytania w minutach. Liczony przy zapisie, nie przy
+  /// każdym wyświetleniu — treść zmienia się rzadziej niż jest czytana.
+  readingTime Int?          @map("reading_time")
+
+  /// Źródła, na których materiał się opiera. Lista adresów z opisem.
+  /// Json, bo liczba źródeł jest zmienna, a osobna tabela dla dwóch
+  /// linków pod artykułem to zapytanie więcej przy każdym otwarciu.
+  sources     Json?
+
+  // ── SEO ──────────────────────────────────────────────────────────
+  // Część ContentItem, nie osobny system: materiał bez opisu i obrazka
+  // społecznościowego jest w wyszukiwarce i na Facebooku pusty, a to
+  // dotyczy tego samego wiersza, który redaguje autor.
+  metaTitle       String? @map("meta_title")
+  metaDescription String? @map("meta_description")
+  canonicalUrl    String? @map("canonical_url")
+  ogTitle         String? @map("og_title")
+  ogDescription   String? @map("og_description")
+  ogImage         String? @map("og_image")
+
+  viewCount   Int           @default(0) @map("view_count")
+  commentCount Int          @default(0) @map("comment_count")
+
+  publishedAt DateTime?     @map("published_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  author      Author?          @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  category    ContentCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  sourcePost  Post?            @relation(fields: [sourcePostId], references: [id], onDelete: SetNull)
+  tags        ContentItemTag[]
+  reviews     EditorialReview[]
+  comments    Comment[]
+  revisions   ContentRevision[]
+  collectionItems CollectionItem[]
+  privateNotes    PrivateNote[]
+  relatedTo   ContentRelation[] @relation("RelationFrom")
+  relatedFrom ContentRelation[] @relation("RelationTo")
+
+  @@unique([type, slug])
+  @@index([type, status, publishedAt])
+  @@index([categoryId])
+  @@index([authorId])
+  @@map("content_items")
+}
+
+/// Autor materiału.
+///
+/// Osobno od `User`, bo autorem bywa ktoś, kto nie ma konta w serwisie —
+/// gość, redakcja, konto zbiorcze. Powiązanie z użytkownikiem jest
+/// opcjonalne i działa w drugą stronę: konto może mieć profil autora.
+model Author {
+  id          Int      @id @default(autoincrement())
+  userId      Int?     @unique @map("user_id")
+  name        String
+  slug        String   @unique
+  bio         String?
+  avatarUrl   String?  @map("avatar_url")
+  website     String?
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  contentItems ContentItem[]
+
+  @@map("authors")
+  follows       Follow[]
+}
+
+/// Kategoria bazy wiedzy — drzewo, np. Linux → Sieci → VPN.
+model ContentCategory {
+  id          Int      @id @default(autoincrement())
+  parentId    Int?     @map("parent_id")
+  name        String
+  slug        String   @unique
+  description String?
+  icon        String?
+  position    Int      @default(0)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  parent      ContentCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    ContentCategory[] @relation("CategoryTree")
+  items       ContentItem[]
+
+  @@index([parentId, position])
+  @@map("content_categories")
+}
+
+/// Tag materiału. Osobna tabela łącząca, bo `PostTag` wiąże tagi z postami
+/// forum, a te same tagi mają opisywać także materiały bazy wiedzy.
+model ContentItemTag {
+  contentItemId Int         @map("content_item_id")
+  tagId         Int         @map("tag_id")
+
+  contentItem   ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contentItemId, tagId])
+  @@index([tagId])
+  @@map("content_item_tags")
+}
+
+/// Decyzja redakcji w obiegu publikacji.
+///
+/// Historia, nie stan: każde zgłoszenie, odrzucenie i publikacja zostawia
+/// wiersz. Bez tego nie da się odpowiedzieć, dlaczego materiał wisiał
+/// trzy tygodnie w akceptacji — a to jedyne pytanie, które przy obiegu
+/// redakcyjnym pada naprawdę.
+model EditorialReview {
+  id            Int           @id @default(autoincrement())
+  contentItemId Int           @map("content_item_id")
+  reviewerId    Int?          @map("reviewer_id")
+
+  fromStatus    ContentStatus @map("from_status")
+  toStatus      ContentStatus @map("to_status")
+  note          String?
+
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  contentItem   ContentItem   @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  reviewer      User?         @relation(fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([contentItemId, createdAt])
+  @@map("editorial_reviews")
+}
+
+/// Plik przesłany do serwisu — obrazek w artykule, okładka, załącznik.
+model MediaAsset {
+  id           Int      @id @default(autoincrement())
+  uploadedById Int?     @map("uploaded_by_id")
+
+  url          String
+  filename     String
+  mimeType     String   @map("mime_type")
+  sizeBytes    Int      @map("size_bytes")
+  width        Int?
+  height       Int?
+  /// Tekst alternatywny. Puste pole to obrazek niedostępny dla czytnika ekranu.
+  alt          String?
+  /// Podpis pod obrazkiem, widoczny dla wszystkich. Co innego niż `alt`:
+  /// podpis opisuje kontekst, alt opisuje sam obrazek.
+  caption      String?
+
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([uploadedById])
+  @@map("media_assets")
+}
+
+
+/// Pamięć podręczna tłumaczeń — ten sam tekst tłumaczymy raz.
+model Translation {
+  id              Int       @id @default(autoincrement())
+  entityType      String    @map("entity_type")  // 'post', 'clip', 'news'
+  entityId        Int       @map("entity_id")
+  fieldName       String    @map("field_name")   // 'title', 'content', 'description'
+  sourceLang      String    @default("pl") @map("source_lang")
+  targetLang      String    @map("target_lang")   // 'en', 'de', etc.
+  translatedText  String    @map("translated_text")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([entityType, entityId, fieldName, targetLang])
+  @@index([entityType, entityId])
+  @@index([targetLang])
+  @@map("translations")
+}
+
+/// Historia zmian materiału.
+///
+/// Zapisujemy przy każdej edycji opublikowanego wpisu Wiki — bo wiki żyje
+/// i pytanie „kto to zmienił i co tam było wcześniej" pada tam naprawdę.
+/// Artykuł po publikacji zmienia się rzadko, więc jego rewizje powstają
+/// tylko wtedy, gdy ktoś go faktycznie poprawi.
+///
+/// Trzymamy pełną treść, nie różnicę. Różnica jest tańsza w bajtach
+/// i droższa we wszystkim innym: żeby pokazać wersję sprzed roku, trzeba
+/// odtworzyć łańcuch od początku, a jeden uszkodzony ogniwo psuje resztę.
+model ContentRevision {
+  id            Int         @id @default(autoincrement())
+  contentItemId Int         @map("content_item_id")
+  editorId      Int?        @map("editor_id")
+
+  title         String
+  body          String
+  /// Krótki opis zmiany, jak w wiki: „poprawiona komenda dla Ubuntu 24.04".
+  summary       String?
+
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  contentItem   ContentItem @relation(fields: [contentItemId], references: [id], onDelete: Cascade)
+  editor        User?       @relation("RevisionEditor", fields: [editorId], references: [id], onDelete: SetNull)
+
+  @@index([contentItemId, createdAt])
+  @@map("content_revisions")
+}
+
+/// Rodzaj powiązania między materiałami.
+enum RelationType {
+  /// Ręcznie wskazane „zobacz też".
+  RELATED
+  /// Hasło wiki linkowane z treści innego hasła.
+  MENTIONS
+  /// Materiał, który zastąpił ten (np. nowsza wersja poradnika).
+  SUPERSEDED_BY
+}
+
+/// Powiązanie dwóch materiałów.
+///
+/// Kierunkowe: „A wspomina B" to nie to samo co „B wspomina A". Wersja
+/// bezkierunkowa wymagałaby porządkowania identyfikatorów przy każdym
+/// zapisie i odczycie, a i tak nie umiałaby wyrazić SUPERSEDED_BY.
+model ContentRelation {
+  id        Int          @id @default(autoincrement())
+  fromId    Int          @map("from_id")
+  toId      Int          @map("to_id")
+  type      RelationType @default(RELATED)
+
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  from      ContentItem  @relation("RelationFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to        ContentItem  @relation("RelationTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId, type])
+  @@index([toId])
+  @@map("content_relations")
+}

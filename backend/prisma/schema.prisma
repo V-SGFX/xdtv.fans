@@ -1,0 +1,1367 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────
+
+enum UserRole {
+  USER
+  STREAMER
+  MODERATOR
+  ADMIN
+}
+
+enum PostType {
+  TEXT
+  LINK
+  IMAGE
+  VIDEO
+  CLIP
+  POLL
+  AMA
+}
+
+enum ChannelType {
+  PUBLIC
+  PRIVATE
+  PREMIUM
+}
+
+enum ChannelScope {
+  GLOBAL
+  STREAMER
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+}
+
+enum NewsSource {
+  RSS
+  SCRAPER
+  MANUAL
+}
+
+/// Editorial bucket a feed and its articles belong to.
+enum NewsCategory {
+  DRAMA      /// conflicts, controversies, callouts
+  STREAMERS  /// people: bans, returns, milestones
+  EVENTS     /// tournaments, esports, announcements
+  GAMING     /// releases, patches, general games press
+}
+
+enum VoteType {
+  UP
+  DOWN
+}
+
+// ─── USERS ────────────────────────────────────────────────
+
+model User {
+  id            Int       @id @default(autoincrement())
+  email         String    @unique
+  username      String    @unique
+  passwordHash  String?   @map("password_hash")  // nullable for OAuth-only users
+  displayName   String?   @map("display_name")
+
+  // OAuth platform IDs
+  twitchId      String?   @unique @map("twitch_id")
+  kickId        String?   @unique @map("kick_id")
+  youtubeId     String?   @unique @map("youtube_id")
+  tiktokId      String?   @unique @map("tiktok_id")
+  discordId     String?   @unique @map("discord_id")
+  avatarUrl     String?   @map("avatar_url")
+  role          UserRole  @default(USER)
+  isActive      Boolean   @default(true) @map("is_active")
+
+  // Email verification
+  isEmailVerified     Boolean   @default(false) @map("is_email_verified")
+  emailVerifyToken    String?   @map("email_verify_token")
+
+  // Password reset
+  passwordResetToken  String?   @map("password_reset_token")
+  passwordResetExpires DateTime? @map("password_reset_expires")
+
+  lastActiveAt  DateTime? @map("last_active_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  streamerProfile StreamerProfile?
+  posts           Post[]
+  messages        Message[]
+  follows         Follow[]
+  subscriptions   Subscription[]
+  comments        Comment[]
+  votes           Vote[]
+  notifications   Notification[] @relation("UserNotifications")
+  actedNotifications Notification[] @relation("NotificationActor")
+  reports         Report[]       @relation("UserReports")
+  resolvedReports Report[]       @relation("ReportResolver")
+  messageReactions MessageReaction[]
+  postReactions   PostReaction[]
+  battleVotes     BattleVote[]
+  channelMutes    ChannelMute[]   @relation("MutedUser")
+  channelMutesBy  ChannelMute[]   @relation("MutedByUser")
+  channelBans     ChannelBan[]    @relation("BannedUser")
+  channelBansBy   ChannelBan[]    @relation("BannedByUser")
+  channelMods     ChannelModerator[]
+
+  communitiesCreated  Community[]          @relation("CommunityCreator")
+  communityMembers    CommunityMember[]
+  communityMods       CommunityModerator[]
+  modNominationsMade  CommunityModerator[] @relation("ModeratorNominatedBy")
+  modApprovalsMade    CommunityModerator[] @relation("ModeratorApprovedBy")
+  communityBans       CommunityBan[]       @relation("CommunityBannedUser")
+  communityBansBy     CommunityBan[]       @relation("CommunityBannedByUser")
+  preferences         UserPreference?
+  pollVotes           PollVote[]
+  amaQuestions        AmaQuestion[]
+  amaAnswers          AmaAnswer[]
+
+  // Engagement system
+  xp                  UserXp?
+  badges              UserBadge[]
+  streak              UserStreak?
+  xpTransactions      XpTransaction[]
+  dailyChallenges     UserDailyChallenge[]
+
+  // Hot Takes
+  hotTakes            HotTake[]     @relation("HotTakeAuthor")
+  hotTakeVotes        HotTakeVote[] @relation("HotTakeVoter")
+
+  // Predictions
+  predictionsCreated  Prediction[]      @relation("PredictionCreator")
+  predictionBets      PredictionBet[]   @relation("PredictionBettor")
+
+  // Power Rankings
+  rankingVotes        RankingVote[]     @relation("RankingVoter")
+
+  // Cosmetics
+  cosmetics           UserCosmetic[]    @relation("UserCosmetics")
+
+  // Admin
+  adminActionLogs     AdminActionLog[]
+
+  @@index([role])
+  @@index([lastActiveAt])
+  @@index([createdAt])
+  @@map("users")
+}
+
+// ─── USER PREFERENCES (feed personalization signals) ──────
+
+model UserPreference {
+  id                  Int      @id @default(autoincrement())
+  userId              Int      @unique @map("user_id")
+  viewedStreamerIds    Int[]    @default([]) @map("viewed_streamer_ids")   // streamerProfileIds the user viewed
+  likedTagSlugs       String[] @default([]) @map("liked_tag_slugs")       // tag slugs the user engaged with
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+// ─── STREAMER PROFILES ────────────────────────────────────
+
+model StreamerProfile {
+  id            Int       @id @default(autoincrement())
+  userId        Int?      @unique @map("user_id")
+  slug          String    @unique
+  name          String
+  bio           String?
+  avatarUrl     String?   @map("avatar_url")
+  bannerUrl     String?   @map("banner_url")
+  twitchUrl     String?   @map("twitch_url")
+  youtubeUrl    String?   @map("youtube_url")
+  kickUrl       String?   @map("kick_url")
+  twitterUrl    String?   @map("twitter_url")
+
+  // Platform IDs for API sync
+  twitchId      String?   @unique @map("twitch_id")
+  kickId        String?   @unique @map("kick_id")
+  youtubeId     String?   @unique @map("youtube_id")
+  tiktokId      String?   @unique @map("tiktok_id")
+
+  isClaimed     Boolean   @default(false) @map("is_claimed")
+  isVerified    Boolean   @default(false) @map("is_verified")
+  isLive        Boolean   @default(false) @map("is_live")
+  chatEnabled   Boolean   @default(false) @map("chat_enabled")
+  viewCount     Int       @default(0) @map("view_count")
+  followerCount Int       @default(0) @map("follower_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user          User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  channels      Channel[]
+  posts         Post[]    @relation("StreamerPosts")
+  follows       Follow[]
+  news          News[]
+  subscriptions Subscription[]
+  chatEmojis    ChatEmoji[]
+  battles1      Battle[]    @relation("BattleStreamer1")
+  battles2      Battle[]    @relation("BattleStreamer2")
+  stats         StreamerStats[]
+  rankingVotes  RankingVote[]
+  community     Community?        @relation("StreamerCommunity")
+  @@index([slug])
+  @@index([name])
+  @@index([twitchId])
+  @@index([kickId])
+  @@index([youtubeId])
+  @@index([tiktokId])
+  @@map("streamer_profiles")
+}
+
+// ─── STREAMER STATS (per-platform live/follower data) ─────
+
+model StreamerStats {
+  id                Int       @id @default(autoincrement())
+  streamerProfileId Int       @map("streamer_profile_id")
+  platform          Platform
+  followers         Int       @default(0)
+  isLive            Boolean   @default(false) @map("is_live")
+  streamTitle       String?   @map("stream_title")
+  viewerCount       Int       @default(0) @map("viewer_count")
+  thumbnailUrl      String?   @map("thumbnail_url")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  streamerProfile   StreamerProfile @relation(fields: [streamerProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([streamerProfileId, platform])
+  @@index([platform])
+  @@index([isLive])
+  @@map("streamer_stats")
+}
+
+// ─── POSTS ────────────────────────────────────────────────
+
+model Post {
+  id              Int       @id @default(autoincrement())
+  authorId        Int       @map("author_id")
+  streamerProfileId Int?    @map("streamer_profile_id")
+  communityId     Int?      @map("community_id")
+  title           String
+  content         String
+  type            PostType  @default(TEXT)
+  isOfficial      Boolean   @default(false) @map("is_official")
+  isNsfw          Boolean   @default(false) @map("is_nsfw")
+  isFlagged       Boolean   @default(false) @map("is_flagged")
+  imageUrl        String?   @map("image_url")
+  linkUrl         String?   @map("link_url")
+  videoUrl        String?   @map("video_url")
+  thumbnailUrl    String?   @map("thumbnail_url")
+  clipSource      ClipSource? @map("clip_source")
+  externalId      String?   @map("external_id")
+  duration        Int?      // seconds (for clips)
+  viewCount       Int       @default(0) @map("view_count")
+  upvotes         Int       @default(0)
+  downvotes       Int       @default(0)
+  commentCount    Int       @default(0) @map("comment_count")
+  hotScore        Float     @default(0) @map("hot_score")
+  isPinned        Boolean   @default(false) @map("is_pinned")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  author          User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  streamerProfile StreamerProfile? @relation("StreamerPosts", fields: [streamerProfileId], references: [id], onDelete: SetNull)
+  community       Community? @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  comments        Comment[]
+  votes           Vote[]
+  tags            PostTag[]
+  reactions       PostReaction[]
+  images          PostImage[]
+  poll            Poll?
+  amaSession      AmaSession?
+  follows         Follow[]
+
+  @@index([authorId])
+  @@index([streamerProfileId])
+  @@index([communityId])
+  @@index([createdAt])
+  @@index([type])
+  @@index([isOfficial])
+  @@index([hotScore])
+  @@map("posts")
+}
+
+// ─── POST IMAGES ──────────────────────────────────────────
+
+model PostImage {
+  id        Int      @id @default(autoincrement())
+  postId    Int      @map("post_id")
+  url       String
+  order     Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@map("post_images")
+}
+
+// ─── POLLS ────────────────────────────────────────────────
+
+model Poll {
+  id        Int          @id @default(autoincrement())
+  postId    Int          @unique @map("post_id")
+  endsAt    DateTime?    @map("ends_at")
+  createdAt DateTime     @default(now()) @map("created_at")
+
+  post      Post         @relation(fields: [postId], references: [id], onDelete: Cascade)
+  options   PollOption[]
+
+  @@map("polls")
+}
+
+model PollOption {
+  id        Int        @id @default(autoincrement())
+  pollId    Int        @map("poll_id")
+  text      String
+  order     Int        @default(0)
+  voteCount Int        @default(0) @map("vote_count")
+
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes     PollVote[]
+
+  @@index([pollId])
+  @@map("poll_options")
+}
+
+model PollVote {
+  id        Int        @id @default(autoincrement())
+  optionId  Int        @map("option_id")
+  userId    Int        @map("user_id")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([optionId, userId])
+  @@index([userId])
+  @@map("poll_votes")
+}
+
+// ─── AMA (Ask Me Anything) ────────────────────────────────
+
+model AmaSession {
+  id          Int           @id @default(autoincrement())
+  postId      Int           @unique @map("post_id")
+  endsAt      DateTime      @map("ends_at")
+  isOpen      Boolean       @default(true) @map("is_open")
+  createdAt   DateTime      @default(now()) @map("created_at")
+
+  post        Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  questions   AmaQuestion[]
+
+  @@map("ama_sessions")
+}
+
+model AmaQuestion {
+  id           Int          @id @default(autoincrement())
+  sessionId    Int          @map("session_id")
+  authorId     Int          @map("author_id")
+  content      String
+  upvotes      Int          @default(0)
+  isAnswered   Boolean      @default(false) @map("is_answered")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  session      AmaSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  answer       AmaAnswer?
+
+  @@index([sessionId])
+  @@index([authorId])
+  @@map("ama_questions")
+}
+
+model AmaAnswer {
+  id           Int          @id @default(autoincrement())
+  questionId   Int          @unique @map("question_id")
+  authorId     Int          @map("author_id")
+  content      String
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  question     AmaQuestion  @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  author       User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@map("ama_answers")
+}
+
+// ─── POST REACTIONS (emoji on posts) ──────────────────────
+
+model PostReaction {
+  id          Int       @id @default(autoincrement())
+  postId      Int       @map("post_id")
+  userId      Int       @map("user_id")
+  emoji       String
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  post        Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId, emoji])
+  @@index([postId])
+  @@map("post_reactions")
+}
+
+// ─── TAGS (replace forum categories) ──────────────────────
+
+/// Domain dimension a tag belongs to.
+///
+/// The tag table is a single flat namespace that in practice carries several
+/// orthogonal dimensions at once — `fortnite` (a game), `english` (a language)
+/// and `clip` (a format) were all stored identically, which left the UI unable
+/// to tell them apart and forced it to render every tag as a plain #hashtag.
+///
+/// This is a logical layer only: no separate Game table exists, so a "game" is
+/// a Tag with type GAME. Extracting a real Game entity later stays possible.
+enum TagType {
+  GAME      /// A title: fortnite, cs2, elden-ring
+  CATEGORY  /// A content category: just-chatting, irl, music, esports
+  LANGUAGE  /// Broadcast language: english, russian, spanish
+  FORMAT    /// Source or medium: clip, twitch, youtube, shorts
+  TOPIC     /// Free-form theme or mood: humor, drama, speedrun (default)
+}
+
+model Tag {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  slug        String    @unique
+  color       String?
+  type        TagType   @default(TOPIC)
+  postCount   Int       @default(0) @map("post_count")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  posts       PostTag[]
+  follows     Follow[]
+
+  @@index([slug])
+  @@index([postCount])
+  @@index([type])
+  @@map("tags")
+}
+
+model PostTag {
+  postId    Int     @map("post_id")
+  tagId     Int     @map("tag_id")
+
+  // Relations
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+  @@map("post_tags")
+}
+
+// ─── CHANNELS (global + streamer, Discord-style) ─────────
+
+model Channel {
+  id                Int          @id @default(autoincrement())
+  scope             ChannelScope @default(STREAMER)
+  streamerProfileId Int?         @map("streamer_profile_id")
+  name              String
+  slug              String
+  description       String?
+  type              ChannelType  @default(PUBLIC)
+  sortOrder         Int          @default(0) @map("sort_order")
+  isActive          Boolean      @default(true) @map("is_active")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  streamerProfile   StreamerProfile? @relation(fields: [streamerProfileId], references: [id], onDelete: Cascade)
+  messages          Message[]
+  mutes             ChannelMute[]
+  bans              ChannelBan[]
+  moderators        ChannelModerator[]
+
+  @@unique([scope, streamerProfileId, slug])
+  @@index([scope])
+  @@index([streamerProfileId])
+  @@map("channels")
+}
+
+// ─── MESSAGES (chat) ──────────────────────────────────────
+
+model Message {
+  id          Int       @id @default(autoincrement())
+  channelId   Int       @map("channel_id")
+  authorId    Int       @map("author_id")
+  content     String
+  isPinned    Boolean   @default(false) @map("is_pinned")
+  isDeleted   Boolean   @default(false) @map("is_deleted")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  channel     Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  reactions   MessageReaction[]
+
+  @@index([channelId, createdAt])
+  @@index([channelId, isPinned])
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// ─── MESSAGE REACTIONS ────────────────────────────────────
+
+model MessageReaction {
+  id          Int       @id @default(autoincrement())
+  messageId   Int       @map("message_id")
+  userId      Int       @map("user_id")
+  emoji       String
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+  @@map("message_reactions")
+}
+
+// ─── FOLLOWS ──────────────────────────────────────────────
+
+/// A follow edge. Targets either a streamer or a tag (a game, a category, a
+/// language) — exactly one of the two is set.
+///
+/// Extended rather than duplicated into a second table: the semantics are
+/// identical ("show me more of this"), the Following feed reads them together,
+/// and a TagFollow model would mean two queries and two toggle endpoints for
+/// one concept.
+model Follow {
+  id                Int       @id @default(autoincrement())
+  userId            Int       @map("user_id")
+  streamerProfileId Int?      @map("streamer_profile_id")
+  tagId             Int?      @map("tag_id")
+  postId            Int?      @map("post_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  streamerProfile   StreamerProfile?  @relation(fields: [streamerProfileId], references: [id], onDelete: Cascade)
+  tag               Tag?              @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  post              Post?             @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, streamerProfileId])
+  @@unique([userId, tagId])
+  @@unique([userId, postId])
+  @@index([streamerProfileId])
+  @@index([tagId])
+  @@index([postId])
+  @@map("follows")
+}
+
+// ─── NEWS ─────────────────────────────────────────────────
+
+model RssSource {
+  id            Int       @id @default(autoincrement())
+  name          String
+  url           String    @unique
+  language      String    @default("en")
+  /// Everything this feed produces lands in this bucket. Feed-level rather
+  /// than per-article because publishers already split by section, and
+  /// classifying headlines by keyword guesses badly.
+  category      NewsCategory @default(GAMING)
+  isActive      Boolean   @default(true) @map("is_active")
+  lastScrapedAt DateTime? @map("last_scraped_at")
+  articlesCount Int       @default(0) @map("articles_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("rss_sources")
+}
+
+model News {
+  id                Int         @id @default(autoincrement())
+  streamerProfileId Int?        @map("streamer_profile_id")
+  /// Polish. The scraper has always written the translated text here and
+  /// 1,466 existing rows are Polish, so this stays the PL field.
+  title             String
+  summary           String?
+  /// English. For an English-language feed this is the untouched original, so
+  /// storing both languages costs one translation call rather than two.
+  titleEn           String?     @map("title_en")
+  summaryEn         String?     @map("summary_en")
+  /// English body. Tłumaczony razem z tytułem i zajawką, jednym przebiegiem
+  /// scrapera. Artykuły sprzed tej kolumny go nie mają i przy angielskim
+  /// interfejsie pokazują treść oryginalną — lepszą niż pusty ekran.
+  contentEn         String?     @map("content_en")
+  category          NewsCategory @default(GAMING)
+  commentCount      Int         @default(0) @map("comment_count")
+  content           String?
+  sourceUrl         String      @unique @map("source_url")
+  source            NewsSource  @default(RSS)
+  sourceName        String?     @map("source_name")
+  imageUrl          String?     @map("image_url")
+  isPublished       Boolean     @default(true) @map("is_published")
+  publishedAt       DateTime?   @map("published_at")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  streamerProfile   StreamerProfile? @relation(fields: [streamerProfileId], references: [id], onDelete: SetNull)
+  comments          Comment[]
+
+  @@index([streamerProfileId])
+  @@index([createdAt])
+  @@index([publishedAt])
+  @@index([category])
+  @@map("news")
+}
+
+// ─── SUBSCRIPTIONS (future monetization) ──────────────────
+
+model Subscription {
+  id                Int                @id @default(autoincrement())
+  userId            Int                @map("user_id")
+  streamerProfileId Int                @map("streamer_profile_id")
+  status            SubscriptionStatus @default(ACTIVE)
+  tier              Int                @default(1)
+  expiresAt         DateTime?          @map("expires_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  // Relations
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  streamerProfile   StreamerProfile   @relation(fields: [streamerProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, streamerProfileId])
+  @@index([status])
+  @@index([expiresAt])
+  @@map("subscriptions")
+}
+
+// ─── COMMENTS (threaded discussions on posts) ─────────────
+
+/// A comment on a post or on a news article — exactly one of the two.
+///
+/// News was the only content type users could not discuss, because a comment
+/// could only point at a Post. Rather than mint a shadow Post per article and
+/// duplicate its title and summary, the target is nullable on both sides.
+model Comment {
+  id          Int       @id @default(autoincrement())
+  postId      Int?      @map("post_id")
+  newsId      Int?      @map("news_id")
+  authorId    Int       @map("author_id")
+  parentId    Int?      @map("parent_id")
+  content     String
+  depth       Int       @default(0) @db.SmallInt
+  path        String    @default("")
+  upvotes     Int       @default(0)
+  downvotes   Int       @default(0)
+  isDeleted   Boolean   @default(false) @map("is_deleted")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  post        Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  news        News?     @relation(fields: [newsId], references: [id], onDelete: Cascade)
+  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent      Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies     Comment[] @relation("CommentReplies")
+
+  votes       Vote[]
+
+  @@index([postId, createdAt])
+  @@index([newsId])
+  @@index([postId, path])
+  @@index([authorId])
+  @@index([parentId])
+  @@map("comments")
+}
+
+// ─── VOTES (per-user voting on posts & comments) ──────────
+
+model Vote {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  postId      Int?      @map("post_id")
+  commentId   Int?      @map("comment_id")
+  type        VoteType
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post        Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  comment     Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, postId])
+  @@unique([userId, commentId])
+  @@index([postId])
+  @@index([commentId])
+  @@map("votes")
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+enum ReportTargetType {
+  POST
+  COMMENT
+  USER
+}
+
+enum NotificationType {
+  COMMENT_ON_POST
+  REPLY_TO_COMMENT
+  VOTE_ON_POST
+  VOTE_ON_COMMENT
+  NEW_FOLLOWER
+  MENTION
+  CHANNEL_CREATED
+  STREAK_WARNING
+  LEVEL_UP
+  PREDICTION_RESOLVED
+}
+
+// ─── CHANNEL MODERATION ───────────────────────────────────
+
+model ChannelMute {
+  id        Int       @id @default(autoincrement())
+  channelId Int       @map("channel_id")
+  userId    Int       @map("user_id")
+  mutedById Int       @map("muted_by_id")
+  reason    String?
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User      @relation("MutedUser", fields: [userId], references: [id], onDelete: Cascade)
+  mutedBy   User      @relation("MutedByUser", fields: [mutedById], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+  @@index([userId])
+  @@map("channel_mutes")
+}
+
+model ChannelBan {
+  id        Int       @id @default(autoincrement())
+  channelId Int       @map("channel_id")
+  userId    Int       @map("user_id")
+  bannedById Int      @map("banned_by_id")
+  reason    String?
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User      @relation("BannedUser", fields: [userId], references: [id], onDelete: Cascade)
+  bannedBy  User      @relation("BannedByUser", fields: [bannedById], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+  @@index([userId])
+  @@map("channel_bans")
+}
+
+// ─── CHANNEL MODERATORS (per-channel mod roles) ───────────
+
+model ChannelModerator {
+  id        Int       @id @default(autoincrement())
+  channelId Int       @map("channel_id")
+  userId    Int       @map("user_id")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+  @@index([userId])
+  @@map("channel_moderators")
+}
+
+model Notification {
+  id          Int               @id @default(autoincrement())
+  userId      Int               @map("user_id")
+  actorId     Int?              @map("actor_id")
+  type        NotificationType
+  postId      Int?              @map("post_id")
+  commentId   Int?              @map("comment_id")
+  message     String
+  isRead      Boolean           @default(false) @map("is_read")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  // Relations
+  user        User              @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor       User?             @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+// ─── REPORTS (user-submitted moderation reports) ──────────
+
+model Report {
+  id              Int              @id @default(autoincrement())
+  reporterId      Int              @map("reporter_id")
+  targetType      ReportTargetType @map("target_type")
+  targetId        Int              @map("target_id")
+  reason          String
+  status          ReportStatus     @default(PENDING)
+  adminNote       String?          @map("admin_note")
+  resolvedById    Int?             @map("resolved_by_id")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  // Relations
+  reporter        User             @relation("UserReports", fields: [reporterId], references: [id], onDelete: Cascade)
+  resolvedBy      User?            @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([targetType, targetId])
+  @@index([reporterId])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+// ─── CHAT EMOJIS (custom emoji system) ────────────────────
+
+model ChatEmoji {
+  id                Int              @id @default(autoincrement())
+  name              String           @unique
+  code              String           @unique
+  url               String
+  isAnimated        Boolean          @default(false) @map("is_animated")
+  isGlobal          Boolean          @default(true) @map("is_global")
+  isPremium         Boolean          @default(false) @map("is_premium")
+  streamerProfileId Int?             @map("streamer_profile_id")
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  // Relations
+  streamerProfile   StreamerProfile? @relation(fields: [streamerProfileId], references: [id], onDelete: SetNull)
+
+  @@index([isGlobal])
+  @@index([isPremium])
+  @@index([streamerProfileId])
+  @@map("chat_emojis")
+}
+
+// ─── BATTLES (streamer vs streamer voting) ────────────────
+
+enum BattleStatus {
+  ACTIVE
+  FINISHED
+}
+
+model Battle {
+  id              Int           @id @default(autoincrement())
+  streamer1Id     Int           @map("streamer1_id")
+  streamer2Id     Int           @map("streamer2_id")
+  title           String?
+  status          BattleStatus  @default(ACTIVE)
+  votes1          Int           @default(0)
+  votes2          Int           @default(0)
+  endsAt          DateTime      @map("ends_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  streamer1       StreamerProfile @relation("BattleStreamer1", fields: [streamer1Id], references: [id], onDelete: Cascade)
+  streamer2       StreamerProfile @relation("BattleStreamer2", fields: [streamer2Id], references: [id], onDelete: Cascade)
+  votes           BattleVote[]
+
+  @@index([status, endsAt])
+  @@map("battles")
+}
+
+model BattleVote {
+  id        Int      @id @default(autoincrement())
+  battleId  Int      @map("battle_id")
+  userId    Int      @map("user_id")
+  side      Int      // 1 or 2
+  createdAt DateTime @default(now()) @map("created_at")
+
+  battle    Battle   @relation(fields: [battleId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([battleId, userId])
+  @@map("battle_votes")
+}
+
+// ─── COMMUNITIES (Reddit-style groups) ────────────────────
+
+model Community {
+  id            Int       @id @default(autoincrement())
+  name          String    @unique
+  slug          String    @unique
+  description   String?
+  iconUrl       String?   @map("icon_url")
+  bannerUrl     String?   @map("banner_url")
+  color         String?   // hex color for theming
+  isOfficial    Boolean   @default(false) @map("is_official")
+  rules         String?   // community rules (markdown)
+  streamerProfileId Int?  @unique @map("streamer_profile_id")
+  postCount     Int       @default(0) @map("post_count")
+  memberCount   Int       @default(0) @map("member_count")
+  createdById   Int       @map("created_by_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  createdBy     User      @relation("CommunityCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  streamerProfile StreamerProfile? @relation("StreamerCommunity", fields: [streamerProfileId], references: [id], onDelete: SetNull)
+  posts         Post[]
+  members       CommunityMember[]
+  moderators    CommunityModerator[]
+  bans          CommunityBan[]
+
+  @@index([slug])
+  @@index([postCount])
+  @@index([memberCount])
+  @@index([createdAt])
+  @@map("communities")
+}
+
+model CommunityMember {
+  id            Int       @id @default(autoincrement())
+  communityId   Int       @map("community_id")
+  userId        Int       @map("user_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([communityId])
+  @@index([userId])
+  @@map("community_members")
+}
+
+/// Moderator scoped to one community.
+///
+/// Until now this table was written once — the creator of a community got a
+/// row — and read by nothing at all. No endpoint added or removed rows, and
+/// no authorisation check consulted it, so the record granted exactly
+/// nothing. The status column is what turns it into a real appointment:
+/// a community owner nominates, an administrator approves, and only an
+/// ACTIVE row confers the power to moderate.
+model CommunityModerator {
+  id            Int             @id @default(autoincrement())
+  communityId   Int             @map("community_id")
+  userId        Int             @map("user_id")
+  status        ModeratorStatus @default(PENDING)
+
+  /// Who put this person forward — the community owner, or an admin acting
+  /// directly. Kept apart from approvedBy so "who wanted this" and "who
+  /// allowed it" stay two separate questions.
+  nominatedById Int?            @map("nominated_by_id")
+  approvedById  Int?            @map("approved_by_id")
+  approvedAt    DateTime?       @map("approved_at")
+  revokedAt     DateTime?       @map("revoked_at")
+  /// Why a nomination was rejected or an appointment withdrawn.
+  reason        String?
+
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nominatedBy   User?     @relation("ModeratorNominatedBy", fields: [nominatedById], references: [id], onDelete: SetNull)
+  approvedBy    User?     @relation("ModeratorApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@unique([communityId, userId])
+  @@index([communityId])
+  @@index([userId])
+  /// The admin queue reads pending nominations across every community.
+  @@index([status])
+  @@map("community_moderators")
+}
+
+enum ModeratorStatus {
+  /// Nominated, waiting for an administrator. Grants nothing.
+  PENDING
+  /// Approved. This is the only status that grants moderation powers.
+  ACTIVE
+  /// Rejected before approval, or withdrawn afterwards. Kept rather than
+  /// deleted so the history of who moderated what stays readable.
+  REVOKED
+}
+
+model CommunityBan {
+  id            Int       @id @default(autoincrement())
+  communityId   Int       @map("community_id")
+  userId        Int       @map("user_id")
+  bannedById    Int       @map("banned_by_id")
+  reason        String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  community     Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  user          User      @relation("CommunityBannedUser", fields: [userId], references: [id], onDelete: Cascade)
+  bannedBy      User      @relation("CommunityBannedByUser", fields: [bannedById], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, userId])
+  @@index([communityId])
+  @@index([userId])
+  @@map("community_bans")
+}
+
+enum ClipSource {
+  UPLOAD
+  YOUTUBE
+  TIKTOK
+  TWITCH
+  KICK
+}
+
+enum Platform {
+  TWITCH
+  KICK
+  YOUTUBE
+  TIKTOK
+  DISCORD
+}
+
+// ─── TRANSLATIONS (multilang content) ─────────────────────
+
+model Translation {
+  id              Int       @id @default(autoincrement())
+  entityType      String    @map("entity_type")  // 'post', 'clip', 'news'
+  entityId        Int       @map("entity_id")
+  fieldName       String    @map("field_name")   // 'title', 'content', 'description'
+  sourceLang      String    @default("pl") @map("source_lang")
+  targetLang      String    @map("target_lang")   // 'en', 'de', etc.
+  translatedText  String    @map("translated_text")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@unique([entityType, entityId, fieldName, targetLang])
+  @@index([entityType, entityId])
+  @@index([targetLang])
+  @@map("translations")
+}
+
+// ─── ENGAGEMENT: XP SYSTEM ───────────────────────────────
+
+model UserXp {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @unique @map("user_id")
+  totalXp     Int       @default(0) @map("total_xp")
+  level       Int       @default(1)
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([totalXp])
+  @@map("user_xp")
+}
+
+enum XpAction {
+  CHAT_MESSAGE
+  CHAT_REACTION
+  BATTLE_VOTE
+  POST_CREATE
+  POST_VOTE
+  COMMENT
+  DAILY_FIRST_MESSAGE
+  DAILY_CHALLENGE_BONUS
+  PREDICTION_WIN
+  HOT_TAKE_VOTE
+  RANKING_VOTE
+}
+
+model XpTransaction {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  action      XpAction
+  amount      Int
+  metadata    String?   // JSON: { battleId, channelId, etc. }
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([action])
+  @@map("xp_transactions")
+}
+
+// ─── ENGAGEMENT: BADGES ──────────────────────────────────
+
+model UserBadge {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  badge       String    // e.g. 'gadacz', 'sedzia', 'wrozbita', 'regularny', 'og'
+  earnedAt    DateTime  @default(now()) @map("earned_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badge])
+  @@index([userId])
+  @@map("user_badges")
+}
+
+// ─── ENGAGEMENT: STREAKS & DAILY CHALLENGES ──────────────
+
+model UserStreak {
+  id            Int       @id @default(autoincrement())
+  userId        Int       @unique @map("user_id")
+  currentStreak Int       @default(0) @map("current_streak")
+  longestStreak Int       @default(0) @map("longest_streak")
+  lastActiveDate String?  @map("last_active_date") // YYYY-MM-DD
+  freezesLeft   Int       @default(0) @map("freezes_left")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_streaks")
+}
+
+enum ChallengeType {
+  BATTLE_VOTE
+  HOT_TAKE_VOTE
+  CHAT_MESSAGE
+  CHAT_REACTION
+  POST_VOTE
+  VISIT_STREAMER
+  CREATE_COMMENT
+}
+
+model UserDailyChallenge {
+  id            Int           @id @default(autoincrement())
+  userId        Int           @map("user_id")
+  date          String        // YYYY-MM-DD
+  challengeType ChallengeType @map("challenge_type")
+  completed     Boolean       @default(false)
+  completedAt   DateTime?     @map("completed_at")
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, challengeType])
+  @@index([userId, date])
+  @@map("user_daily_challenges")
+}
+
+// ─── HOT TAKES ───────────────────────────────────────────
+
+model HotTake {
+  id            Int           @id @default(autoincrement())
+  text          String
+  authorId      Int           @map("author_id")
+  agreeCount    Int           @default(0) @map("agree_count")
+  disagreeCount Int           @default(0) @map("disagree_count")
+  isActive      Boolean       @default(true) @map("is_active")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  author        User          @relation("HotTakeAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  votes         HotTakeVote[]
+
+  @@index([isActive, createdAt])
+  @@map("hot_takes")
+}
+
+model HotTakeVote {
+  id          Int       @id @default(autoincrement())
+  hotTakeId   Int       @map("hot_take_id")
+  userId      Int       @map("user_id")
+  agree       Boolean   // true = agree, false = disagree
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  hotTake     HotTake   @relation(fields: [hotTakeId], references: [id], onDelete: Cascade)
+  user        User      @relation("HotTakeVoter", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([hotTakeId, userId])
+  @@map("hot_take_votes")
+}
+
+// ─── PREDICTIONS ─────────────────────────────────────────
+
+enum PredictionStatus {
+  OPEN
+  LOCKED
+  RESOLVED
+  CANCELLED
+}
+
+model Prediction {
+  id            Int               @id @default(autoincrement())
+  question      String
+  description   String?
+  status        PredictionStatus  @default(OPEN)
+  totalPool     Int               @default(0) @map("total_pool")
+  resolvedOptionId Int?           @map("resolved_option_id")
+  createdById   Int               @map("created_by_id")
+  locksAt       DateTime          @map("locks_at")
+  resolvedAt    DateTime?         @map("resolved_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  createdBy     User              @relation("PredictionCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  options       PredictionOption[]
+  bets          PredictionBet[]
+
+  @@index([status, locksAt])
+  @@map("predictions")
+}
+
+model PredictionOption {
+  id            Int       @id @default(autoincrement())
+  predictionId  Int       @map("prediction_id")
+  label         String
+  totalBet      Int       @default(0) @map("total_bet")
+
+  prediction    Prediction @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+  bets          PredictionBet[]
+
+  @@index([predictionId])
+  @@map("prediction_options")
+}
+
+model PredictionBet {
+  id            Int       @id @default(autoincrement())
+  predictionId  Int       @map("prediction_id")
+  optionId      Int       @map("option_id")
+  userId        Int       @map("user_id")
+  amount        Int       // XP wagered
+  payout        Int?      // XP won (null if unresolved)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  prediction    Prediction      @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+  option        PredictionOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user          User            @relation("PredictionBettor", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([predictionId, userId])
+  @@index([userId])
+  @@map("prediction_bets")
+}
+
+// ─── POWER RANKINGS ──────────────────────────────────────
+
+model PowerRanking {
+  id            Int       @id @default(autoincrement())
+  weekStart     String    @unique @map("week_start") // YYYY-MM-DD (Monday)
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  votes         RankingVote[]
+
+  @@index([isActive])
+  @@map("power_rankings")
+}
+
+model RankingVote {
+  id              Int       @id @default(autoincrement())
+  rankingId       Int       @map("ranking_id")
+  userId          Int       @map("user_id")
+  streamerId      Int       @map("streamer_id")
+  position        Int       // 1-10 rank given by user
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  ranking         PowerRanking    @relation(fields: [rankingId], references: [id], onDelete: Cascade)
+  user            User            @relation("RankingVoter", fields: [userId], references: [id], onDelete: Cascade)
+  streamer        StreamerProfile @relation(fields: [streamerId], references: [id], onDelete: Cascade)
+
+  @@unique([rankingId, userId, streamerId])
+  @@index([rankingId, streamerId])
+  @@map("ranking_votes")
+}
+
+// ─── XP SHOP / COSMETICS ────────────────────────────────
+
+enum CosmeticType {
+  CHAT_COLOR
+  CHAT_BORDER
+  CHAT_BADGE
+  NICKNAME_EFFECT
+}
+
+model UserCosmetic {
+  id            Int           @id @default(autoincrement())
+  userId        Int           @map("user_id")
+  type          CosmeticType
+  value         String        // e.g. '#ff00aa', 'animated-fire', 'vip'
+  xpCost        Int           @map("xp_cost")
+  isActive      Boolean       @default(true) @map("is_active")
+  expiresAt     DateTime?     @map("expires_at") // null = permanent
+  purchasedAt   DateTime      @default(now()) @map("purchased_at")
+
+  user          User          @relation("UserCosmetics", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, isActive])
+  @@map("user_cosmetics")
+}
+
+// ─── STEAM GAMES & PROTONDB ─────────────────────────────
+
+
+
+
+// ─── SYNC SETTINGS ────────────────────────────────────────
+
+
+// ─── ADMIN ACTIONS LOG ────────────────────────────────────
+
+model AdminActionLog {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @map("user_id")
+  action      String   // e.g., "TRIGGER_SYNC", "UPDATE_SETTINGS", "RETRY_JOB"
+  targetType  String   @map("target_type") // e.g., "SYNC", "GAME", "SETTINGS"
+  targetId    String?  @map("target_id")
+  metadata    Json?    // additional data
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+  
+  createdAt   DateTime @default(now()) @map("created_at")
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("admin_action_logs")
+}
+
+/// Blok reklamowy.
+///
+/// Kod wstawia administrator w panelu i jest to **surowy HTML wykonywany
+/// w przeglądarce odwiedzającego** — inaczej nie da się osadzić AdSense,
+/// bo jego snippet to znacznik <script>. Dlatego zapis do tej tabeli jest
+/// dostępny wyłącznie z panelu administracyjnego, a punkt końcowy API
+/// zwraca kod tylko dla bloków aktywnych. Kto może tu pisać, ten i tak
+/// może zrobić z serwisem wszystko.
+///
+/// `key` jest kontraktem między bazą a kodem strony: komponent <AdSlot>
+/// szuka bloku po tym kluczu. Nowy klucz w bazie nie pojawi się nigdzie,
+/// dopóki ktoś nie wstawi komponentu w widoku — i odwrotnie, komponent bez
+/// pasującego wiersza po prostu nic nie rysuje.
+model AdSlot {
+  id          Int      @id @default(autoincrement())
+  /// Identyfikator używany w kodzie strony, np. "home-top".
+  key         String   @unique
+  /// Nazwa dla człowieka w panelu.
+  name        String
+  /// Gdzie dokładnie ten blok się pokazuje — opis dla administratora.
+  description String?
+  /// Kod od dostawcy reklam (AdSense, sieć afiliacyjna, własny baner).
+  code        String?
+  /// Wyłączony blok nie trafia do API w ogóle.
+  isActive    Boolean  @default(false) @map("is_active")
+  /// Kolejność w panelu; nie wpływa na wygląd strony.
+  position    Int      @default(0)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([isActive])
+  @@map("ad_slots")
+}

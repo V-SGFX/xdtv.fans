@@ -1,0 +1,19 @@
+node_modules/
+dist/
+*.log
+/logs/
+
+# env & secrets — never commit
+.env
+.env.*
+!.env.example
+CREDENTIALS.txt
+ADMIN_CREDENTIALS.md
+
+# build artifacts
+*.tsbuildinfo
+.adminjs/
+
+# runtime data
+/uploads/
+/backups/

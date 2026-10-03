@@ -1,0 +1,446 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════
+   XDTV Design System — Glass / iOS Inspired Dark Theme
+   ═══════════════════════════════════════════════════════ */
+
+@theme inline {
+  /* ═══════════════════════════════════════════════════════
+     XDTV DESIGN SYSTEM
+     ═══════════════════════════════════════════════════════
+     Two layers live here on purpose:
+
+     1. SEMANTIC — the system going forward. New and rebuilt
+        components use only these.
+     2. LEGACY — the original palette, kept alive so the ~930
+        existing usages keep rendering. Tailwind fails silently
+        on an unknown token (the class is simply not generated),
+        so these are removed per-component as each is rebuilt,
+        never in bulk.
+     ═══════════════════════════════════════════════════════ */
+
+  /* ── SEMANTIC · surfaces ── */
+  --color-surface-sunken: #050508;
+  --color-surface-base: #08080C;
+  --color-surface-raised: #101016;
+  --color-surface-hover: #16161E;
+
+  /* ── SEMANTIC · hairlines ── */
+  --color-line: rgba(255, 255, 255, 0.07);
+  --color-line-strong: rgba(255, 255, 255, 0.13);
+
+  /* ── SEMANTIC · content (text) ── */
+  --color-content-primary: #EDEEF3;
+  --color-content-secondary: #9AA1B2;
+  --color-content-muted: #656C7E;
+
+  /* ── SEMANTIC · accents ──
+     One accent carries interaction. `live` is reserved for
+     genuinely-live state and destructive actions; it must never
+     be used decoratively, or LIVE stops meaning live. */
+  --color-accent: #00D4FF;
+  --color-live: #FF3B5C;
+  --color-success: #34D399;
+  --color-warn: #F5A524;
+
+  /* ── LEGACY · backgrounds ── */
+  --color-dark-950: #000000;
+  --color-dark-900: #030307;
+  --color-dark-800: #08080e;
+  --color-dark-700: #111118;
+  --color-dark-600: #18181f;
+  --color-dark-500: #232330;
+
+  /* ── LEGACY · accents ──
+     neon-yellow and neon-orange were factually wrong: they held
+     #A78BFA (purple) and #818CF8 (indigo). That is why ~150 raw
+     Tailwind colours (yellow-400, orange-500, amber-500…) leaked
+     into the app — the tokens could not deliver what their names
+     promised. Corrected to real hues. */
+  --color-neon-cyan: #00D4FF;
+  --color-neon-purple: #8B5CF6;
+  --color-neon-pink: #E840A5;
+  --color-neon-green: #34D399;
+  --color-neon-blue: #60A5FA;
+  --color-neon-yellow: #F5A524;
+  --color-neon-orange: #FB8B3C;
+  --color-neon-red: #F43F5E;
+
+  /* ── LEGACY · text ── */
+  --color-text-primary: #EAECF5;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+  --color-text-dimmed: #475569;
+
+  /* ── LEGACY · borders ── */
+  --color-border-default: rgba(255, 255, 255, 0.08);
+  --color-border-hover: rgba(255, 255, 255, 0.15);
+  --color-border-active: #8B5CF6;
+
+  /* ── RADIUS · three steps ──
+     The app had five in simultaneous use (md 61x, lg 225x,
+     xl 125x, 2xl 33x, sm). Rather than rewrite 444 class names,
+     the ramp itself is collapsed: md/lg both resolve to 10px and
+     xl/2xl/3xl to 14px. Existing markup converges immediately;
+     class names are tidied as components are rebuilt.
+       sm  6px — badges, chips, small controls
+       lg 10px — cards, buttons, inputs
+       xl 14px — modals, large panels */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 14px;
+  --radius-3xl: 14px;
+
+  /* ── TYPE · six steps ──
+     2xs absorbs the 216 arbitrary sizes the audit found: the
+     8px, 9px, 10px and 11px literals. 8px and 9px text was below
+     any readable minimum, so this is also an accessibility fix. */
+  --text-2xs: 0.6875rem;      /* 11px — meta, badges, counts */
+  --text-2xs--line-height: 1.45;
+  --text-xs: 0.75rem;         /* 12px — secondary meta */
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.875rem;        /* 14px — body small */
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem;          /* 16px — body */
+  --text-base--line-height: 1.55;
+  --text-lg: 1.125rem;        /* 18px — card / section titles */
+  --text-lg--line-height: 1.35;
+  --text-xl: 1.375rem;        /* 22px — page titles */
+  --text-xl--line-height: 1.25;
+  --text-2xl: 1.75rem;        /* 28px — display */
+  --text-2xl--line-height: 1.15;
+
+  /* ── MOTION ──
+     Deliberately short. Motion orients; it does not perform. */
+  --ease-out-quick: cubic-bezier(0.2, 0, 0, 1);
+  --animate-duration-fast: 120ms;
+  --animate-duration-base: 160ms;
+  --animate-duration-slow: 220ms;
+
+  /* ── Fonts ── */
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-space-grotesk);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Z-INDEX SCALE
+   The audit found 12 unmanaged values including z-[59],
+   z-[61], z-[70], z-[80], z-[100] and z-[101] — the classic
+   "why is this behind that" setup. Named layers only.
+   ═══════════════════════════════════════════════════════ */
+@utility z-base { z-index: 0; }
+@utility z-raised { z-index: 10; }
+@utility z-sticky { z-index: 20; }
+@utility z-overlay { z-index: 30; }
+@utility z-nav { z-index: 100; }
+@utility z-dropdown { z-index: 200; }
+@utility z-modal { z-index: 300; }
+@utility z-toast { z-index: 400; }
+
+/* ── Base Styles ── */
+:root {
+  --glow-cyan: 0 0 15px rgba(0, 212, 255, 0.2), 0 0 30px rgba(0, 212, 255, 0.06);
+  --glow-purple: 0 0 15px rgba(139, 92, 246, 0.2), 0 0 30px rgba(139, 92, 246, 0.06);
+  --glow-pink: 0 0 15px rgba(232, 64, 165, 0.2), 0 0 30px rgba(232, 64, 165, 0.06);
+  --glow-green: 0 0 15px rgba(52, 211, 153, 0.2), 0 0 30px rgba(52, 211, 153, 0.06);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.08) transparent;
+}
+
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+body {
+  background: #030307;
+  color: #EAECF5;
+  font-family: var(--font-inter), system-ui, sans-serif;
+
+  /* One over-wide element must not make the whole page scroll sideways.
+     `clip` rather than `hidden` on purpose: overflow-x: hidden creates a
+     scroll container, which silently breaks every position: sticky element
+     inside it — and the navbar and both tab bars are sticky. */
+  overflow-x: clip;
+}
+
+/* iOS zooms the viewport when a focused input is under 16px. The design uses
+   14px inputs, so the size is raised on touch-primary devices only, where the
+   compact rhythm matters less than not having the page jump on focus. */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Utility used by horizontally scrolling strips (tab bars, community
+   switcher). The scrollbar is noise on a row of chips. */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Neon Glow Utilities ── */
+.glow-cyan { box-shadow: var(--glow-cyan); }
+.glow-purple { box-shadow: var(--glow-purple); }
+.glow-pink { box-shadow: var(--glow-pink); }
+.glow-green { box-shadow: var(--glow-green); }
+
+.text-glow-cyan { text-shadow: 0 0 8px rgba(0, 212, 255, 0.35), 0 0 16px rgba(0, 212, 255, 0.12); }
+.text-glow-purple { text-shadow: 0 0 8px rgba(139, 92, 246, 0.35), 0 0 16px rgba(139, 92, 246, 0.12); }
+.text-glow-pink { text-shadow: 0 0 8px rgba(232, 64, 165, 0.35), 0 0 16px rgba(232, 64, 165, 0.12); }
+.text-glow-green { text-shadow: 0 0 8px rgba(52, 211, 153, 0.35), 0 0 16px rgba(52, 211, 153, 0.12); }
+
+/* ── Gradient Backgrounds ── */
+.bg-mesh {
+  background-image:
+    radial-gradient(at 20% 20%, rgba(96, 165, 250, 0.05) 0px, transparent 50%),
+    radial-gradient(at 80% 80%, rgba(139, 92, 246, 0.04) 0px, transparent 50%),
+    radial-gradient(at 50% 50%, rgba(0, 212, 255, 0.03) 0px, transparent 50%);
+}
+
+.bg-grid {
+  background-image: linear-gradient(rgba(139, 92, 246, 0.02) 1px, transparent 1px),
+                    linear-gradient(90deg, rgba(139, 92, 246, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Card — dark panel (battles-style) ── */
+.card-neon {
+  position: relative;
+  background: rgba(8, 8, 14, 0.6);
+  border: 1px solid var(--color-border-default);
+  border-radius: 16px;
+  transition: all 0.25s ease;
+}
+
+.card-neon:hover {
+  border-color: var(--color-border-hover);
+  background: rgba(8, 8, 14, 0.75);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+/* ── Reusable panel classes ── */
+.panel {
+  background: rgba(8, 8, 14, 0.6);
+  border: 1px solid var(--color-border-default);
+  border-radius: 16px;
+  transition: border-color 0.2s ease;
+}
+.panel:hover { border-color: var(--color-border-hover); }
+
+.panel-sm {
+  background: rgba(8, 8, 14, 0.5);
+  border: 1px solid var(--color-border-default);
+  border-radius: 12px;
+}
+
+.panel-inner {
+  background: rgba(17, 17, 24, 0.4);
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+.panel-inner:hover { background: rgba(17, 17, 24, 0.6); }
+
+.panel-tabs {
+  background: rgba(8, 8, 14, 0.5);
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.panel-stat {
+  background: rgba(8, 8, 14, 0.6);
+  border: 1px solid var(--color-border-default);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: background 0.2s ease;
+}
+.panel-stat:hover { background: rgba(8, 8, 14, 0.75); }
+
+.panel-info {
+  background: rgba(8, 8, 14, 0.4);
+  border: 1px solid var(--color-border-default);
+  border-radius: 12px;
+}
+
+/* ── LIVE Badge Pulse ── */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.live-badge::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #EF4444;
+  border-radius: 50%;
+  margin-right: 4px;
+  animation: live-pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Gradient text ── */
+.gradient-text {
+  background: linear-gradient(135deg, #00D4FF, #8B5CF6, #E840A5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Animated gradient border ── */
+@keyframes gradient-rotate {
+  0% { --angle: 0deg; }
+  100% { --angle: 360deg; }
+}
+
+/* ── Skeleton shimmer ── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ── Dialog entry ──
+   Mobile enters as a bottom sheet, desktop as a centred panel. Both are
+   short; a dialog that takes 300ms to arrive feels broken, not polished. */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modalIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.99); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (min-width: 640px) {
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(6px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+}
+
+/* Respect the OS setting. motion-safe: covers the utility classes; this
+   catches anything that animates through raw CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* ── Status indicator ── */
+.status-online { box-shadow: 0 0 0 2px #030307, 0 0 6px rgba(52, 211, 153, 0.4); background: #34D399; }
+.status-offline { box-shadow: 0 0 0 2px #030307; background: #475569; }
+.status-live { box-shadow: 0 0 0 2px #030307, 0 0 6px rgba(244, 63, 94, 0.4); background: #F43F5E; }
+
+/* ── Selection ── */
+::selection {
+  background: rgba(139, 92, 246, 0.25);
+  color: #EAECF5;
+}
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid rgba(139, 92, 246, 0.4);
+  outline-offset: 2px;
+}
+
+/* ── TipTap editor ── */
+.prose-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #475569;
+  pointer-events: none;
+  height: 0;
+}
+.prose-editor p { margin: 0.25em 0; }
+.prose-editor h2 { font-size: 1.25em; font-weight: 700; margin: 0.75em 0 0.25em; color: #F1F5F9; }
+.prose-editor h3 { font-size: 1.1em; font-weight: 600; margin: 0.5em 0 0.25em; color: #F1F5F9; }
+.prose-editor strong { font-weight: 700; }
+.prose-editor em { font-style: italic; }
+.prose-editor s { text-decoration: line-through; opacity: 0.6; }
+.prose-editor a { color: #00D4FF; text-decoration: none; }
+.prose-editor a:hover { text-decoration: underline; }
+.prose-editor code { background: rgba(139, 92, 246, 0.1); color: #C4B5FD; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.875em; font-family: monospace; }
+.prose-editor pre { background: #0A0F1A; border: 1px solid #1E293B; border-radius: 8px; padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
+.prose-editor pre code { background: none; color: #CBD5E1; padding: 0; font-size: 0.85em; }
+.prose-editor blockquote { border-left: 3px solid #8B5CF6; padding-left: 0.75em; margin: 0.5em 0; color: #94A3B8; font-style: italic; }
+.prose-editor ul { list-style: disc; padding-left: 1.5em; margin: 0.25em 0; }
+.prose-editor ol { list-style: decimal; padding-left: 1.5em; margin: 0.25em 0; }
+.prose-editor li { margin: 0.1em 0; }
+.prose-editor .spoiler { background: #1E293B; color: #1E293B; border-radius: 3px; padding: 0 0.2em; cursor: pointer; transition: color 0.2s; }
+.prose-editor .spoiler:hover { color: #F1F5F9; }
+
+/* ── Rich post content ── */
+.prose-post { font-size: 0.875rem; line-height: 1.6; color: #CBD5E1; word-break: break-word; }
+.prose-post p { margin: 0.25em 0; }
+.prose-post h2 { font-size: 1.2em; font-weight: 700; margin: 0.75em 0 0.25em; color: #F1F5F9; }
+.prose-post h3 { font-size: 1.05em; font-weight: 600; margin: 0.5em 0 0.25em; color: #F1F5F9; }
+.prose-post strong { font-weight: 700; color: #F1F5F9; }
+.prose-post em { font-style: italic; }
+.prose-post s { text-decoration: line-through; opacity: 0.6; }
+.prose-post a { color: #00D4FF; text-decoration: none; }
+.prose-post a:hover { text-decoration: underline; }
+.prose-post code { background: rgba(139, 92, 246, 0.1); color: #C4B5FD; padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.875em; font-family: monospace; }
+.prose-post pre { background: #0A0F1A; border: 1px solid #1E293B; border-radius: 8px; padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
+.prose-post pre code { background: none; color: #CBD5E1; padding: 0; font-size: 0.85em; }
+.prose-post blockquote { border-left: 3px solid #8B5CF6; padding-left: 0.75em; margin: 0.5em 0; color: #94A3B8; font-style: italic; }
+.prose-post ul { list-style: disc; padding-left: 1.5em; margin: 0.25em 0; }
+.prose-post ol { list-style: decimal; padding-left: 1.5em; margin: 0.25em 0; }
+.prose-post li { margin: 0.1em 0; }
+.prose-post span[data-spoiler] { background: #1E293B; color: #1E293B; border-radius: 3px; padding: 0 0.2em; cursor: pointer; transition: color 0.2s; }
+.prose-post span[data-spoiler]:hover,
+.prose-post span[data-spoiler].revealed { color: #F1F5F9; }
+
+/* ═══════════════════════════════════════════════════════
+   LEGAL PAGES — Regulamin, Polityka Prywatności
+   ═══════════════════════════════════════════════════════ */
+.legal-page { padding: 40px 24px 80px; max-width: 860px; margin: 0 auto; }
+.legal-container h1 { font-size: 1.8rem; font-weight: 700; color: #f0f0f0; margin: 0 0 8px; }
+.legal-updated { font-size: .82rem; color: #666; margin: 0 0 36px; }
+.legal-container section { margin-bottom: 32px; }
+.legal-container h2 { font-size: 1.15rem; font-weight: 600; color: #e0e0e0; margin: 0 0 12px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.legal-container h3 { font-size: 1rem; font-weight: 600; color: #d0d0d0; margin: 0 0 8px; }
+.legal-container ol { padding-left: 24px; margin: 0; list-style: decimal; }
+.legal-container ol li { font-size: .9rem; color: #bbb; line-height: 1.7; margin-bottom: 8px; }
+.legal-container ul { list-style: disc; padding-left: 20px; margin: 6px 0; }
+.legal-container ul li { font-size: .88rem; color: #aaa; line-height: 1.6; margin-bottom: 4px; }
+.legal-container a { color: var(--neon-cyan, #00F5FF); text-decoration: underline; text-underline-offset: 2px; }
+.legal-container a:hover { color: #fff; }
+.legal-container strong { color: #ddd; font-weight: 600; }
+.legal-container code { background: rgba(255,255,255,.06); padding: 1px 6px; border-radius: 4px; font-size: .84rem; color: #ccc; }
+.legal-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .85rem; }
+.legal-table th, .legal-table td { padding: 10px 14px; text-align: left; border: 1px solid rgba(255,255,255,.08); }
+.legal-table th { background: rgba(255,255,255,.04); color: #ddd; font-weight: 600; font-size: .82rem; text-transform: uppercase; letter-spacing: .3px; }
+.legal-table td { color: #aaa; }
+.legal-contact { margin-top: 40px; padding: 20px 24px; border-radius: 12px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); }
+.legal-contact p { font-size: .9rem; color: #aaa; margin: 4px 0 0; }
+@media (max-width: 768px) {
+  .legal-page { padding: 24px 16px 60px; }
+  .legal-container h1 { font-size: 1.4rem; }
+  .legal-table { font-size: .78rem; }
+  .legal-table th, .legal-table td { padding: 8px 10px; }
+}
